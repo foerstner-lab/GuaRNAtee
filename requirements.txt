@@ -1,0 +1,13 @@
+biopython
+more-itertools
+numpy
+pandas
+pandas-stubs
+pybedtools
+scipy
+tqdm
+openpyxl
+matplotlib
+scikit-learn
+ViennaRNA
+colorama
