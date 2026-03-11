@@ -3,14 +3,14 @@ import os
 import pandas as pd
 import pybedtools as pybed
 from tqdm import tqdm
-from guarnatee_lib.window_peaks import WindowPeaks
+from guarnatee_lib.peak_caller import PeakCaller
 from guarnatee_lib.helpers import Helpers
 
 
-class WindowSRNA:
+class TranscriptAssembler:
     """
-    This class is build upon WindowPeaks class,
-    which combines peaks called from WindowPeaks into WindowSRNA to form annotation candidates
+    This class is built upon PeakCaller class,
+    which combines peaks called from PeakCaller into transcript candidates to form RNA annotation candidates
     """
 
     def __init__(self, five_end_wiggle, three_end_wiggle):
@@ -58,29 +58,37 @@ class WindowSRNA:
             if seqid != "NC_002516.2":
                 continue
             """
-            print(f"=> Calling 5' ends for SeqID: {seqid}")
-            five_end_peaks_obj = WindowPeaks(
+            print(f"Calling 5' ends for SeqID: {seqid}")
+            five_end_peaks_obj = PeakCaller(
                 self.five_end_wiggle[seqid],
                 conf_dict["min_distance"],
                 conf_dict["min_height"],
                 conf_dict["min_step_factor"],
                 bool(self.strand == "-"),
                 "SS",
-                thres_factor
+                thres_factor,
+                False
             )
-            print(f"=> Calling 3' ends for SeqID: {seqid}")
-            three_end_peaks_obj = WindowPeaks(
+            print(f"Calling 3' ends for SeqID: {seqid}")
+            three_end_peaks_obj = PeakCaller(
                 self.three_end_wiggle[seqid],
                 conf_dict["min_distance"],
                 conf_dict["min_height"],
                 conf_dict["min_step_factor"],
                 bool(self.strand == "+"),
                 "TS",
-                thres_factor
+                thres_factor,
+                True
             )
+            five_end_peaks_obj.export_to_gff(f"{seqid}_{self.strand}_5.gff", seqid=seqid, strand=self.strand)
+            three_end_peaks_obj.export_to_gff(f"{seqid}_{self.strand}_3.gff", seqid=seqid, strand=self.strand)
 
             five_end_peaks_str = five_end_peaks_obj.get_bed_str(seqid)
             three_end_peaks_str = three_end_peaks_obj.get_bed_str(seqid)
+
+
+
+
             if five_end_peaks_str is None or three_end_peaks_str is None:
                 continue
             five_end_peaks_bed = pybed.BedTool(
@@ -89,6 +97,7 @@ class WindowSRNA:
             three_end_peaks_bed = pybed.BedTool(
                 three_end_peaks_str, from_string=True
             ).sort()
+
             connected_peaks_df = (
                 self.connect_sites(
                     five_end_peaks_bed, three_end_peaks_bed, int(conf_dict["min_len"]), int(conf_dict["max_len"])
@@ -99,9 +108,9 @@ class WindowSRNA:
                 )
             )
             tmp_dict = {"seqid": seqid,
-                        "TSS_lib_windows_count": len(five_end_peaks_obj.windows),
+                        #"TSS_lib_windows_count": len(five_end_peaks_obj.windows),
                         "TSS_lib_peaks_count": five_end_peaks_obj.peaks_arr.size,
-                        "TTS_lib_windows_count": len(three_end_peaks_obj.windows),
+                        #"TTS_lib_windows_count": len(three_end_peaks_obj.windows),
                         "TTS_lib_peaks_count": three_end_peaks_obj.peaks_arr.size,
                         "peaks_connections_count": connected_peaks_df.shape[0],
                         "TSS_peaks_thresholds": five_end_peaks_obj.peaks_arr[:, 1].tolist(),
@@ -121,7 +130,9 @@ class WindowSRNA:
         ret_df = pd.DataFrame(columns=base_columns)
         start_df = start_bed.to_dataframe(names=base_columns)
         end_df = end_bed.to_dataframe(names=base_columns)
-        for row_id in tqdm(start_df.index, desc="==> Connecting 5' - 3' ends", bar_format='{desc} |{bar:20}| {percentage:3.0f}%'):
+        for row_id in tqdm(start_df.index, desc="Connecting 5' - 3' ends", bar_format='{desc} |{bar:20}| {percentage:3.0f}%'):
+            #if start_df.at[row_id, "start"] == 1682314:
+            #    pass
             size_range = set(
                 range(
                     start_df.at[row_id, "start"] + min_len,

@@ -1,0 +1,15 @@
+"--lib_mode" argument takes one of 4 modes depending on your library setup.
+1. "trio"
+use if you will pass 3 wig files, 1 control lib for 5' end, 1 enriched lib for 5' end, and 1 lib for 3'
+
+2. "duo"
+use if you will pass 2 wig files, 1 lib for 5' end, and 1 lib for 3'
+Usage example:
+
+3. "solo_pe"
+use if you will pass 2 wig files, 1 lib for forward strand, and 1 lib for reverse strand. (both pairs of reads must be mapped separately on single end mode)
+Usage example:
+
+4. "solo_fl"
+use if you will use 1 wig file, which is produced from fragment re-built paired end mapping, or long-read. This means the coverage is produced from full length transcripts.
+Usage example:

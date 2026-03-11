@@ -40,7 +40,7 @@ class RNAClassifier:
         self.get_intergenic_flanks()
         #self._filter_orf_int_segments()
         self.get_gff_sequences_features(is_rna=True)
-        self._drop_redundancies()
+        #self._drop_redundancies()
         self.classes.sort_values(["seqid", "start", "end"], inplace=True)
         self.classes.reset_index(drop=True, inplace=True)
         self.rank_candidates()
@@ -60,49 +60,107 @@ class RNAClassifier:
 
     def rank_candidates(self):
         df = Helpers.expand_attributes_to_columns(self.classes)
-        rank_columns = ["ss_step_factor", "ts_step_factor", "ss_mean_plateau_height", "ts_mean_plateau_height", "mfe"]
-        """
-        rank_columns = {"step_factors": ["ss_step_factor", "ts_step_factor"],
-                        "plateau_heights": ["ss_mean_plateau_height", "ts_mean_plateau_height"],
-                        "mfe": ["mfe"]}
-        """
+
+        rank_columns = ["ss_step_factor", "ts_step_factor",
+                        "ss_mean_plateau_height", "ts_mean_plateau_height",
+                        "mfe"]
         ranked_columns = [f"{c}_rank" for c in rank_columns]
-        for rank_col in rank_columns:
-            df[rank_col] = pd.to_numeric(df[rank_col], errors='coerce', downcast='float').abs()
-            df[f"{rank_col}_no_log"] = df[rank_col]
-            df[rank_col] = np.log10(df[rank_col].astype(float).replace([0, 0.0], np.nan))
+
+        # --- 1) Coerce to numeric early (strings like "" "." become NaN) ---
+        for c in rank_columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+
+        # Keep originals (pre-log) for later restoration
+        for c in rank_columns:
+            df[f"{c}_no_log"] = df[c]
+
+        # --- 2) Transform safely ---
+        # abs() because you later do .abs(); keep it consistent
+        for c in rank_columns:
+            x = df[c].abs()
+
+            # Remove infinities from upstream calculations / overflow
+            x = x.replace([np.inf, -np.inf], np.nan)
+
+            # Avoid log10(0): clamp to smallest positive float (or a domain-specific epsilon)
+            # If you *want* zeros to be treated as missing, keep them as NaN instead.
+            eps = np.finfo(np.float64).tiny  # ~5e-324
+            x = x.where(x > 0, np.nan)  # keep your old "0 -> NaN" semantics
+            x = np.log10(x.clip(lower=eps))
+
+            # If overflow happened earlier, log10(inf) gives inf; remove again
+            x = x.replace([np.inf, -np.inf], np.nan)
+
+            df[c] = x
+
         scaler = MinMaxScaler()
+
+        # Build group list (your logic preserved)
         if "sub_class" in df.columns:
-            dfs_list = [df[df["annotation_class"] == cls].copy() for cls in df["annotation_class"].unique() if cls != "ORF_int"]
-            dfs_list.extend([df[df["sub_class"] == cls].copy() for cls in df["sub_class"].unique() if cls != ""])
+            dfs_list = [df[df["annotation_class"] == cls].copy()
+                        for cls in df["annotation_class"].unique()
+                        if cls != "ORF_int"]
+            dfs_list.extend([df[df["sub_class"] == cls].copy()
+                             for cls in df["sub_class"].unique()
+                             if cls != ""])
         else:
-            dfs_list = [df[df["annotation_class"] == cls].copy() for cls in df["annotation_class"].unique()]
+            dfs_list = [df[df["annotation_class"] == cls].copy()
+                        for cls in df["annotation_class"].unique()]
 
         dfs_ranked_list = []
-        for tmp_df in dfs_list:
-            tmp_df.reset_index(inplace=True, drop=True)
-            scaled_df = pd.DataFrame(scaler.fit_transform(tmp_df[rank_columns]), columns=ranked_columns)
-            scaled_df["step_factors_rank"] = \
-                scaled_df[["ss_step_factor_rank", "ts_step_factor_rank"]].sum(axis=1)
-            scaled_df["plateau_heights_rank"] = \
-                scaled_df[["ss_mean_plateau_height_rank", "ts_mean_plateau_height_rank"]].sum(axis=1)
-            # sums of sums
-            scaled_df["sum_step_factors_mfe_rank"] = \
-                scaled_df[["step_factors_rank", "mfe_rank"]].sum(axis=1)
-            scaled_df["sum_plateau_heights_mfe_rank"] = \
-                scaled_df[["plateau_heights_rank", "mfe_rank"]].sum(axis=1)
-            scaled_df["sum_all_rank"] = \
-                scaled_df[["step_factors_rank", "plateau_heights_rank", "mfe_rank"]].sum(axis=1)
-            tmp_df = pd.merge(left=tmp_df, right=scaled_df, left_index=True, right_index=True).fillna("")
-            dfs_ranked_list.append(tmp_df)
-        df = pd.concat(dfs_ranked_list, ignore_index=True)
-        df.reset_index(inplace=True, drop=True)
-        for rank_col in rank_columns:
-            df[rank_col] = df[f"{rank_col}_no_log"]
-            df.drop(columns=[f"{rank_col}_no_log"], inplace=True)
-        df.drop(columns=["ss_step_factor_rank", "ts_step_factor_rank", "ss_mean_plateau_height_rank", "ts_mean_plateau_height_rank"], inplace=True)
-        self.classes = Helpers.warp_non_gff_columns(df)
 
+        for tmp_df in dfs_list:
+            tmp_df = tmp_df.reset_index(drop=True)
+
+            X = tmp_df[rank_columns].copy()
+
+            # --- 3) Decide how to handle NaNs created by log10/cleaning ---
+            # Option 1 (recommended): fill with per-group median
+            X = X.replace([np.inf, -np.inf], np.nan)
+            X = X.fillna(X.median(numeric_only=True))
+
+            # If a column is all-NaN in this group, median is NaN -> fill with 0
+            X = X.fillna(0)
+
+            # Final guardrail
+            if not np.isfinite(X.to_numpy()).all():
+                bad = ~np.isfinite(X.to_numpy())
+                raise ValueError(
+                    f"Non-finite values remain before scaling in group. "
+                    f"Example rows:\n{X.loc[np.where(bad.any(axis=1))[0][:5]].to_string()}"
+                )
+
+            scaled_df = pd.DataFrame(scaler.fit_transform(X), columns=ranked_columns)
+
+            # --- 4) Your derived ranks (unchanged) ---
+            scaled_df["step_factors_rank"] = scaled_df[["ss_step_factor_rank", "ts_step_factor_rank"]].sum(axis=1)
+            scaled_df["plateau_heights_rank"] = scaled_df[
+                ["ss_mean_plateau_height_rank", "ts_mean_plateau_height_rank"]].sum(axis=1)
+
+            scaled_df["sum_step_factors_mfe_rank"] = scaled_df[["step_factors_rank", "mfe_rank"]].sum(axis=1)
+            scaled_df["sum_plateau_heights_mfe_rank"] = scaled_df[["plateau_heights_rank", "mfe_rank"]].sum(axis=1)
+            scaled_df["sum_all_rank"] = scaled_df[["step_factors_rank", "plateau_heights_rank", "mfe_rank"]].sum(axis=1)
+
+            # IMPORTANT: do NOT cast whole df to string here
+            tmp_df = pd.concat([tmp_df, scaled_df], axis=1)
+            dfs_ranked_list.append(tmp_df)
+
+        df = pd.concat(dfs_ranked_list, ignore_index=True)
+
+        # Restore original (no-log) columns
+        for c in rank_columns:
+            df[c] = df[f"{c}_no_log"]
+            df.drop(columns=[f"{c}_no_log"], inplace=True)
+
+        df.drop(columns=["ss_step_factor_rank", "ts_step_factor_rank",
+                         "ss_mean_plateau_height_rank", "ts_mean_plateau_height_rank"],
+                inplace=True)
+
+        # If you truly need string output, stringify ONLY non-numeric columns at the end:
+        # obj_cols = df.select_dtypes(include=["object", "string"]).columns
+        # df[obj_cols] = df[obj_cols].astype("string").fillna("")
+
+        self.classes = Helpers.warp_non_gff_columns(df)
 
     def _drop_redundancies(self):
         df = Helpers.expand_attributes_to_columns(self.classes)
@@ -111,7 +169,7 @@ class RNAClassifier:
         )
         drop_ids = []
         for seqid, strand, select_column in tqdm(
-            combs, desc="===> Cleaning redundancies", bar_format='{desc} |{bar:20}| {percentage:3.0f}%'
+            combs, desc="Cleaning redundancies", bar_format='{desc} |{bar:20}| {percentage:3.0f}%'
         ):
             df_slice = df[(df["seqid"] == seqid) & (df["strand"] == strand)]
             select_keys = df_slice[select_column].unique().tolist()
@@ -152,7 +210,7 @@ class RNAClassifier:
         # print(clusteres_df.to_string())
 
     def classify(self):
-        print("=> Classifying candidates")
+        print("Classifying candidates")
         anno_tbl_df = Helpers.warp_non_gff_columns(self.anno_tbl_df)
         candidates_df = anno_tbl_df.copy()
         candidates_df["type"] = "sRNA_candidate"
@@ -177,7 +235,8 @@ class RNAClassifier:
         for rc in ref_columns:
             if rc not in candidates_df.columns:
                 continue
-            candidates_df.loc[candidates_df[rc] == ".", rc] = ""
+            #candidates_df.loc[candidates_df[rc] == ".", rc] = ""
+            candidates_df.loc[candidates_df[rc] == ".", rc] = np.nan
 
         # get novel intergenic (no intersection or unannotated regions)
         diff_df = candidates_df[candidates_df["overlap_size"] <= 0].copy()
@@ -190,7 +249,9 @@ class RNAClassifier:
         # Clean ref_type column
         candidates_df["ref_type_tmp"] = candidates_df["ref_type"].apply(substr_filter_func, args=(["RNA", "CDS"], "|")).replace("", np.nan)
         candidates_df.loc[candidates_df["ref_attributes"].str.contains("gene_biotype=protein_coding"), ["ref_type_tmp"]] = "CDS"
-        candidates_df["ref_type"].update(candidates_df["ref_type_tmp"])
+        mask = candidates_df["ref_type_tmp"].notna()
+        candidates_df.loc[mask, "ref_type"] = candidates_df.loc[mask, "ref_type_tmp"]
+
         candidates_df.drop(columns=["ref_type_tmp"], inplace=True)
         # filter attributes to get values of interest
         candidates_df = Helpers.filter_attributes(candidates_df, attr_filters, "ref_attributes")
@@ -291,7 +352,7 @@ class RNAClassifier:
                 multi_intersect_df.at[i, f"{rename_ref}upstream_segment_size"] = overlap_info["diff_before_size"]
                 multi_intersect_df.at[i, f"{rename_ref}downstream_segment_size"] = overlap_info["diff_after_size"]
         multi_intersect_df.drop(columns=ref_cols + ["overlap_size"], inplace=True)
-        multi_intersect_df.fillna("", inplace=True)
+        multi_intersect_df = multi_intersect_df.astype("string").fillna("")
 
         multi_intersect_df = Helpers.rewrap_attributes_column(multi_intersect_df)
         multi_intersect_df = Helpers.warp_non_gff_columns(multi_intersect_df)
@@ -401,7 +462,7 @@ class RNAClassifier:
         return ret_dict
 
     def prefilter_candidates(self):
-        print("=> Pre-filtering candidates")
+        print("Pre-filtering candidates")
         # self._drop_overlaps_of_cds_5_ends()
         self._drop_unwanted_classes()
         # self._drop_cross_overlapping_annotations()
@@ -474,11 +535,17 @@ class RNAClassifier:
 
         intergenic_df.drop(columns=drop_cols, inplace=True)
         self.classes = pd.merge(left=self.classes, right=intergenic_df, on=self.gff_columns, how="left")
-        self.classes.fillna("", inplace=True)
+        obj_cols = self.classes.select_dtypes(include="object").columns
+        self.classes[obj_cols] = (
+            self.classes[obj_cols]
+            .astype("string")
+            .fillna("")
+        )
+
         self.classes = Helpers.warp_non_gff_columns(self.classes)
 
     def get_gff_sequences_features(self, is_rna=False, slice_size=40) -> None:
-        print("=> Extracting RNA features")
+        print("Analyzing RNA structural features")
         gff_df = self.classes.copy()
         sequence_col = f"{'RNA' if is_rna else 'DNA'}_sequence"
         with tempfile.NamedTemporaryFile(mode="w") as temp:
@@ -510,16 +577,16 @@ class RNAClassifier:
         )
         seqs_df["start"] += 1
         gff_df = pd.merge(
-            left=gff_df,
-            right=seqs_df,
+            left=gff_df.astype('string'),
+            right=seqs_df.astype('string'),
             on=["seqid", "start", "end", "strand"],
             how="left",
         )
         gff_df.fillna("_", inplace=True)
-        gff_df["GC_content"] = gff_df["RNA_sequence"].map(lambda x: round(SeqUtils.GC(x), 2))
+        gff_df["GC_content"] = gff_df["RNA_sequence"].map(lambda x: round(SeqUtils.gc_fraction(x), 2))
 
-        #slice_prefix = f"{slice_size}_nt_"
-        #gff_df[f"{slice_prefix}RNA_sequence"] = gff_df["RNA_sequence"].str[-slice_size:]
+        slice_prefix = f"{slice_size}_nt_"
+        gff_df[f"{slice_prefix}RNA_sequence"] = gff_df["RNA_sequence"].str[-slice_size:]
         #gff_df[f"10nt_RNA_sequence"] = gff_df["RNA_sequence"].str[-10:]
         gff_df = Helpers.explode_dict_yielding_func_into_columns(gff_df, "RNA_sequence", self.get_rna_structure_scores)
         #gff_df = Helpers.explode_dict_yielding_func_into_columns(gff_df, f"{slice_prefix}RNA_sequence", self.get_rna_structure_scores, slice_prefix)

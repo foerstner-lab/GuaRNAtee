@@ -25,7 +25,7 @@ class GFF:
         self.seqid_groups = {}
 
     def parse(self):
-        print("=> Parsing input GFF file")
+        print("Parsing input GFF file")
         parsed_paths = []
         for item in self.gff_paths:
             for sub_item in glob.glob(item):
@@ -44,5 +44,5 @@ class GFF:
             [self.regions, self.gff_df[self.gff_df["type"] == "region"]]
         )
         self.gff_df.drop(self.regions.index, inplace=True, axis=0)
-        print(f"==> Parsed {self.gff_df.shape[0]} from {len(parsed_paths)} GFF files")
+        print(f"Parsed {self.gff_df.shape[0]} from {len(parsed_paths)} GFF files")
 

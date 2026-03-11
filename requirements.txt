@@ -1,7 +1,7 @@
 biopython
 more-itertools
-numpy
-pandas
+numpy <= 1.26.4
+pandas <= 2.2.1
 pandas-stubs
 pybedtools
 scipy
@@ -11,3 +11,4 @@ matplotlib
 scikit-learn
 ViennaRNA
 colorama
+argcomplete

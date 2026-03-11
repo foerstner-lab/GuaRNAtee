@@ -19,7 +19,7 @@ class Fasta:
         self.parse()
 
     def parse(self):
-        print("=> Parsing input fasta files")
+        print("Parsing input fasta files")
         parsed_paths = []
         for item in self.fasta_paths:
             for sub_item in glob.glob(item):
@@ -49,4 +49,4 @@ class Fasta:
             [f">{k}\n{v}" for k, v in self.fwd_seqs.items()]
         )
 
-        print(f"==> Parsed {len(self.fwd_seqs)} from {len(parsed_paths)} Fasta files")
+        print(f"Parsed {len(self.fwd_seqs)} from {len(parsed_paths)} Fasta files")

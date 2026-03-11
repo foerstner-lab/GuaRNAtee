@@ -1,233 +1,249 @@
-import sys
-import numpy as np
-from colorama import Fore
-from guarnatee_lib.window_srna import WindowSRNA
-from guarnatee_lib.rna_classifier import RNAClassifier
-from guarnatee_lib.differential_classifier import DifferentialClassifier
-from guarnatee_lib.candidates_merger import CandidatesMerger
-from guarnatee_lib.helpers import Helpers
-from guarnatee_lib.wiggle import Wiggle
-from guarnatee_lib.gff import GFF
-import argparse
-import pandas as pd
-import os
-from guarnatee_lib.fasta import Fasta
-import pybedtools as pybed
-import configparser
-import matplotlib.pyplot as plt
+#!/usr/bin/env python3
+# PYTHON_ARGCOMPLETE_OK
+"""
+GuaRNAtee - Genome-wide RNA annotation tool for identification of transcripts.
 
-def main():
-    welcome_text = """\n
+A bioinformatics tool for identifying RNA candidates from RNA-seq data
+using peak detection and annotation classification.
+
+Author: Muhammad Elhossary <elhossary@zbmed.de>
+        Konrad Förstner <konrad@foerstner.org>
+Copyright: 2021 by Muhammad Elhossary <elhossary@zbmed.de>
+License: ISC license
+"""
+import sys
+import os
+import argparse
+import argcomplete
+import logging
+from pathlib import Path
+from colorama import Fore
+
+from guarnatee_lib.config_manager import ConfigManager
+from guarnatee_lib.pipeline_orchestrator import PipelineOrchestrator
+from guarnatee_lib.exceptions import GuaRNAteeException
+from guarnatee_lib.logging_config import setup_logging
+
+__author__ = ("Muhammad Elhossary <elhossary@zbmed.de> "
+              "Konrad Förstner <konrad@foerstner.org> ")
+__copyright__ = "2021 by Muhammad Elhossary <elhossary@zbmed.de>"
+__license__ = "ISC license"
+__email__ = "elhossary@zbmed.de"
+__version__ = "1.0.0"
+__maintainer__ = "Muhammad Elhossary"
+
+
+def print_welcome_banner() -> None:
+    """Print GuaRNAtee welcome banner."""
+    banner = r"""
 ===============================================================================
 ||    ____                    ____    _   _      _       _                   ||
 ||   / ___|  _   _    __ _   |  _ \  | \ | |    / \     | |_    ___    ___   ||
 ||  | |  _  | | | |  / _` |  | |_) | |  \| |   / _ \    | __|  / _ \  / _ \  ||
 ||  | |_| | | |_| | | (_| |  |  _ <  | |\  |  / ___ \   | |_  |  __/ |  __/  ||
 ||   \____|  \__,_|  \__,_|  |_| \_\ |_| \_| /_/   \_\   \__|  \___|  \___|  ||
-===============================================================================\n\n"""
-    print(Fore.RED + welcome_text)
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--gffs", required=True, type=str, nargs="+", help="GFF files (space separated)"
+===============================================================================
+"""
+    print(Fore.RED + banner)
+    print(Fore.WHITE + f"Version {__version__}\n")
+
+
+def parse_arguments() -> argparse.Namespace:
+    """
+    Parse command line arguments.
+
+    Returns:
+        Parsed arguments namespace
+    """
+    parser = argparse.ArgumentParser(
+        description="GuaRNAtee - Genome-wide RNA annotation tool",
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
+
+    # Version
+    parser.add_argument(
+        "-v", "--version",
+        action="version",
+        version=f"GuaRNAtee {__version__}"
+    )
+
+    # Required inputs
+    parser.add_argument(
+        "--gffs",
+        required=True,
+        type=str,
+        nargs="+",
+        help="GFF annotation files (space separated)"
+    )
+
     parser.add_argument(
         "--fastas",
         required=True,
         type=str,
         nargs="+",
-        help="Fasta files (space separated)",
+        help="FASTA genome files (space separated)"
     )
+
     parser.add_argument(
         "--wigs",
         required=True,
         type=str,
-        nargs="+",
-        help="Wiggle files (space separated)",
+        action="append",
+        help=(
+            "Wiggle file annotations in format: "
+            "file_path:condition:replicate:strand:lib_mode "
+            "(repeat for each file)"
+        )
     )
-    parser.add_argument("--threshold", type=int, default=1)
+
+    # Output
     parser.add_argument(
-        "--config_file", default=f"{os.path.dirname(__file__)}/config.cfg", type=str, help="Configuration file"
+        "--out_dir",
+        required=True,
+        type=str,
+        help="Output directory for results"
     )
-    parser.add_argument("--out_dir", required=True, type=str, help="")
+
+    # Optional parameters
+    parser.add_argument(
+        "--threshold",
+        type=int,
+        default=1,
+        help="Peak calling threshold factor (default: 1)"
+    )
+
+    parser.add_argument(
+        "--config_file",
+        default=None,
+        type=str,
+        help="Configuration file (default: config.cfg in script directory)"
+    )
+
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable verbose logging"
+    )
+
+    # Enable autocompletion
+    argcomplete.autocomplete(parser)
+
     args = parser.parse_args()
-    # load files
-    conf_dict = {}
-    conf_file_path = os.path.abspath(args.config_file)
-    conf_parse = configparser.ConfigParser(strict=True)
-    print(f"Loading config file: {conf_file_path}")
-    conf_parse.read(conf_file_path)
-    for sect in conf_parse.sections():
-        conf_dict.update(dict(conf_parse.items(sect)), )
-    gff_obj = GFF(gff_paths=args.gffs)
-    fastas = Fasta(fasta_paths=args.fastas)
-    seqid_groups = fastas.organism_seqid_groups
-    wig_info_df = pd.DataFrame(
-        [x.split(":") for x in args.wigs],
-        columns=["file_path", "strand", "condition", "replicate", "treatment"],
-    )
-    wig_info_df["file_desc"] = (
-        wig_info_df["condition"] + "_rep_" + wig_info_df["replicate"]
-    )
-    export_df = pd.DataFrame()
-    stats_df = pd.DataFrame()
-    for desc in wig_info_df["file_desc"].unique().tolist():
-        tmp_df1 = pd.DataFrame()
-        tmp_df2 = pd.DataFrame()
-        for strand in ["f", "r"]:
-            strand_sign = "+" if strand == "f" else "-"
-            working_wigs = wig_info_df[
-                (wig_info_df["strand"] == strand) & (wig_info_df["file_desc"] == desc)
-            ].loc[:, ["file_path", "treatment"]]
-            if working_wigs.shape[0] not in [3]:
-                print("Error: non-uniformed wiggles passed")
-                sys.exit(1)
-            working_pathes = dict(
-                zip(working_wigs["treatment"], working_wigs["file_path"])
-            )
-            treated_srnas_df, treated_stats_df = _call_srnas(
-                working_pathes["TEX_pos"], working_pathes["term"], conf_dict, args.threshold
-            )
 
-            treated_stats_df["file_desc"] = desc
-            treated_stats_df["TSS_lib_type"] = "treated"
-            treated_stats_df["strand"] = strand
+    # Set default config file if not provided
+    if args.config_file is None:
+        script_dir = Path(__file__).parent
+        args.config_file = str(script_dir / "config.cfg")
 
-            treated_srnas_df["strand"] = strand_sign
-            control_srnas_df, control_stats_df = _call_srnas(
-                working_pathes["TEX_neg"], working_pathes["term"], conf_dict, args.threshold
-            )
-            control_stats_df["file_desc"] = desc
-            control_stats_df["TSS_lib_type"] = "control"
-            control_stats_df["strand"] = strand
+    return args
 
-            control_srnas_df["strand"] = strand_sign
-            tmp_df1 = pd.concat([tmp_df1, treated_srnas_df], ignore_index=True)
-            tmp_df2 = pd.concat([tmp_df2, control_srnas_df], ignore_index=True)
-            stats_df = pd.concat([stats_df, treated_stats_df, control_stats_df], ignore_index=True)
 
-        tmp_df1 = Helpers.get_gff_df(
-            tmp_df1, anno_source="GuaRNAtee", anno_type="candidate", new_id=True
-        )
-        tmp_df2 = Helpers.get_gff_df(
-            tmp_df2, anno_source="GuaRNAtee", anno_type="candidate", new_id=True
-        )
-        tmp_df1["condition"] = desc
-        tmp_df2["condition"] = desc
-        tmp_df1 = Helpers.warp_non_gff_columns(RNAClassifier(gff_obj, tmp_df1, fastas, conf_dict).classes)
-        tmp_df2 = Helpers.warp_non_gff_columns(RNAClassifier(gff_obj, tmp_df2, fastas, conf_dict).classes)
-        tmp_df1, tmp_df2 = DifferentialClassifier({"TEX_pos": tmp_df1, "TEX_neg": tmp_df2}).score_similarity()
-        export_df = pd.concat([export_df, tmp_df1, tmp_df2], ignore_index=True)
-    export_df = Helpers.warp_non_gff_columns(export_df)
-    export_pb = pybed.BedTool.from_dataframe(export_df).sort().cluster(s=True, d=0)
-    export_df = export_pb.to_dataframe(names=gff_obj.column_names + ["cluster_id"])
-    clusters = export_df["cluster_id"].unique().size
-    export_df = Helpers.warp_non_gff_columns(export_df)
-    generate_orf_stats(Helpers.expand_attributes_to_columns(export_df), seqid_groups, args)
-    if conf_dict["detailed_output"] == "False":
-        export_df = CandidatesMerger(export_df, float(conf_dict["merge_similarity_ratio"])).merge()
-    export_df.sort_values(["seqid", "start", "end"], inplace=True)
-    export_df.reset_index(inplace=True, drop=True)
-    export_df["source"] = "GuaRNAtee"
-
-    print(f"Total {export_df.shape[0]} candidates in {clusters} unique regions to be exported")
-    # Exports
-    # ==> GFFs
-    for seqid_group, seqids in seqid_groups.items():
-        export_df[export_df["seqid"].isin(seqids)].to_csv(
-            os.path.abspath(f"{args.out_dir}/{seqid_group}_candidates.gff"),
-            index=False,
-            sep="\t",
-            header=False)
-    # Stats
-    for i in stats_df.index:
-        for k, v in seqid_groups.items():
-            if stats_df.at[i, "seqid"] in v:
-                stats_df.at[i, "Organism"] = k
+def validate_inputs(args: argparse.Namespace) -> None:
     """
-    all_thres = []
-    for i in stats_df.index:
-        all_thres.extend(stats_df.at[i, "TSS_peaks_thresholds"])
-        all_thres.extend(stats_df.at[i, "TTS_peaks_thresholds"])
-    fig = plt.figure(figsize=(16, 9))
-    plt.grid()
-    plt.plot(all_thres)
-    plt.title("Variable threshold factors of IQR")
-    fig.savefig(os.path.abspath(f"{args.out_dir}/dist_thres_iqr.jpg"))
+    Validate that input files exist.
+
+    Args:
+        args: Parsed command line arguments
+
+    Raises:
+        FileNotFoundError: If required files don't exist
     """
-    stats_df = stats_df.groupby(["Organism", "file_desc", "TSS_lib_type"], as_index=False).agg({"TSS_lib_windows_count": "sum",
-                                                                                                "TSS_lib_peaks_count": "sum",
-                                                                                                "TTS_lib_windows_count": "sum",
-                                                                                                "TTS_lib_peaks_count": "sum",
-                                                                                                "peaks_connections_count": "sum"})
-    stats_df.to_csv(os.path.abspath(f"{args.out_dir}/stats.tsv"), sep='\t', index=False)
+    # Check GFF files
+    for gff_path in args.gffs:
+        if not Path(gff_path).exists():
+            raise FileNotFoundError(f"GFF file not found: {gff_path}")
 
-    # ==> Excel
-    drop_cols = ["source", "type", "score", "phase", "id",
-                 "ss_id", "ss_diff_height", "ss_height", "ss_upstream", "ss_downstream",
-                 "ts_id", "ts_diff_height", "ts_height", "ts_upstream", "ts_downstream"]
+    # Check FASTA files
+    for fasta_path in args.fastas:
+        if not Path(fasta_path).exists():
+            raise FileNotFoundError(f"FASTA file not found: {fasta_path}")
 
-    export_df = Helpers.expand_attributes_to_columns(export_df)
-    for col in drop_cols:
-        if col in export_df.columns:
-            export_df.drop(columns=[col], inplace=True)
-    rename_cols = {c: c.replace("_", " ") for c in export_df.columns}
+    # Check wiggle files
+    for wig_annotation in args.wigs:
+        wig_path = wig_annotation.split(":")[0]
+        if not Path(wig_path).exists():
+            raise FileNotFoundError(f"Wiggle file not found: {wig_path}")
 
-    classes_groups = {"intergenic": [], "ORF_int": [], "others": []}
-    for cls in export_df["annotation_class"].unique():
-        if ("cross" in cls and "ncRNA" in cls) or "antisense_to" in cls:
-            classes_groups["others"] += [cls]
-        elif "ncRNA" in cls or "intergenic" in cls:
-            classes_groups["intergenic"] += [cls]
-        elif "ORF_int" in cls:
-            classes_groups["ORF_int"] += [cls]
-        else:
-            classes_groups["others"] += [cls]
-
-    ### Tables
-    for seqid_group, seqids in seqid_groups.items():
-        with pd.ExcelWriter(os.path.abspath(f"{args.out_dir}/{seqid_group}_candidates.xlsx"), engine="openpyxl") \
-                as writer:
-            for classes_group, classes in classes_groups.items():
-                seqid_type_df = export_df[(export_df["seqid"].isin(seqids)) &
-                                          (export_df["annotation_class"].isin(classes))].copy()
-                if seqid_type_df.empty:
-                    continue
-                seqid_type_df.reset_index(inplace=True, drop=True)
-                seqid_type_df.replace("", np.nan, inplace=True)
-                seqid_type_df.dropna(how='all', axis=1, inplace=True)
-                seqid_type_df.rename(columns=rename_cols, inplace=True)
-                seqid_type_df.to_excel(
-                    excel_writer=writer,
-                    sheet_name=f"{classes_group}",
-                    index=True,
-                    header=True,
-                    na_rep="",
-                    verbose=True,
-                    index_label="index")
-    sys.exit(0)
+    # Check config file
+    if not Path(args.config_file).exists():
+        raise FileNotFoundError(f"Config file not found: {args.config_file}")
 
 
-def _call_srnas(five_end_path, three_end_path, conf_dict, threshold):
-    srnas = WindowSRNA(Wiggle(five_end_path), Wiggle(three_end_path))
-    srnas.call_window_srna(conf_dict, thres_factor=threshold)
-    return srnas.srna_candidates, srnas.log_df
+def main() -> int:
+    """
+    Main entry point for GuaRNAtee.
 
+    Returns:
+        Exit code (0 for success, 1 for failure)
+    """
+    # Print welcome banner
+    print_welcome_banner()
 
-def generate_orf_stats(export_df, seqid_groups, args):
-    ### ORF int Stats
-    orf_int_stats_df = export_df[export_df["sub_class"] != ""].copy()
-    orf_int_stats_df["Specie"] = ""
-    for seqid_group, seqids in seqid_groups.items():
-        orf_int_stats_df.loc[orf_int_stats_df["seqid"].isin(seqids), "Specie"] = seqid_group
-    orf_int_stats_df = orf_int_stats_df.value_counts(
-        subset=["Specie", "lib_type", "condition", "sub_class"]).reset_index()
-    orf_int_stats_df.columns = ["Specie", "lib_type", "condition", "sub_class", 'count']
-    with pd.ExcelWriter(os.path.abspath(f"{args.out_dir}/ORF_int_stats.xlsx"), engine="openpyxl") as writer:
-        for sp in orf_int_stats_df["Specie"].unique():
-            tmp_stat_df = orf_int_stats_df[orf_int_stats_df["Specie"] == sp].copy()
-            # tmp_stat_df.drop(columns=[sp], inplace=True)
-            tmp_stat_df.to_excel(excel_writer=writer, sheet_name=sp, index=False, header=True, na_rep="", verbose=True)
+    try:
+        # Parse arguments
+        args = parse_arguments()
+
+        # Setup logging
+        setup_logging(verbose=args.verbose)
+        logger = logging.getLogger(__name__)
+
+        # Validate inputs
+        logger.info("Validating input files...")
+        validate_inputs(args)
+
+        # Load configuration
+        logger.info(f"Loading configuration from: {args.config_file}")
+        config = ConfigManager(args.config_file)
+
+        # Create and run pipeline
+        orchestrator = PipelineOrchestrator(
+            gff_paths=args.gffs,
+            fasta_paths=args.fastas,
+            wig_annotations=args.wigs,
+            config=config,
+            output_dir=args.out_dir,
+            threshold=args.threshold
+        )
+
+        # Execute pipeline
+        results = orchestrator.run()
+
+        # Print summary
+        summary = orchestrator.get_summary()
+        logger.info("\n" + "=" * 80)
+        logger.info("Pipeline Summary:")
+        logger.info(f"  Total candidates: {summary['total_candidates']}")
+        logger.info(f"  Total samples: {summary['total_samples']}")
+        logger.info(f"  Library types: {', '.join(summary['library_types_processed'])}")
+        logger.info(f"  Output directory: {summary['output_directory']}")
+        logger.info("=" * 80)
+
+        print(Fore.GREEN + "\n✓ GuaRNAtee completed successfully!\n")
+        print(Fore.WHITE + "")
+
+        return 0
+
+    except GuaRNAteeException as e:
+        # Handle GuaRNAtee-specific exceptions
+        logger = logging.getLogger(__name__)
+        logger.error(f"Pipeline failed: {e}")
+        print(Fore.RED + f"\n✗ Error: {e}\n")
+        print(Fore.WHITE + "")
+        return 1
+
+    except KeyboardInterrupt:
+        print(Fore.YELLOW + "\n\n✗ Pipeline interrupted by user\n")
+        print(Fore.WHITE + "")
+        return 1
+
+    except Exception as e:
+        # Handle unexpected exceptions
+        logger = logging.getLogger(__name__)
+        logger.exception("Unexpected error occurred")
+        print(Fore.RED + f"\n✗ Unexpected error: {e}\n")
+        print(Fore.WHITE + "")
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

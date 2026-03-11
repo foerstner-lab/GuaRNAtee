@@ -30,7 +30,7 @@ class Wiggle:
         logger.info(f"Parsing {self.file_path}")
         current_wiggle_meta = {}
         with open(self.file_path, "r") as raw_file:
-            logger.info(f"==> Loading file: {os.path.basename(self.file_path)}")
+            logger.info(f"Loading file: {os.path.basename(self.file_path)}")
             file_header, all_contents, empty_seqids = self._parse_wiggle_str(
                 raw_file.read()
             )
@@ -39,7 +39,7 @@ class Wiggle:
             )
             for content_header, content in tqdm(
                 all_contents.items(),
-                desc=f"=> Loading wiggle file: {os.path.basename(self.file_path)}", bar_format='{desc} |{bar:20}| {percentage:3.0f}%'
+                desc=f"Loading wiggle file: {os.path.basename(self.file_path)}", bar_format='{desc} |{bar:20}| {percentage:3.0f}%'
             ):
                 current_wiggle_meta = self.parse_wiggle_header(
                     content_header, current_wiggle_meta
@@ -58,7 +58,7 @@ class Wiggle:
                         f"maximum wiggle position ({chrom_size}) will be used"
                     )
                 else:
-                    logger.info(f"====> Size retrieved for {seqid} is: {chrom_size}")
+                    logger.info(f"Size retrieved for {seqid} is: {chrom_size}")
                 self.chrom_sizes[seqid] = chrom_size
                 self.spans[seqid] = current_wiggle_meta["variableStep_span"]
                 self.orientations[seqid] = (
@@ -66,7 +66,7 @@ class Wiggle:
                 )
             s = "\n     └── "
             logger.info(
-                f"===> Parsed condition: {self.track_name}\n"
+                f"Parsed condition: {self.track_name}\n"
                 f"     + Sequence IDs included:\n"
                 f"     └── {s.join(self.coverages.keys())}"
             )
@@ -82,7 +82,7 @@ class Wiggle:
     def generate_1d_signal(self):
         with tqdm(self.coverages.keys(), bar_format='{desc} |{bar:20}| {percentage:3.0f}%') as tqdm_progress:
             for k in tqdm_progress:
-                tqdm_progress.set_description_str(f"==> Parsing wiggle SeqID '{k}'")
+                tqdm_progress.set_description_str(f"Parsing wiggle SeqID '{k}'")
                 df1 = pd.DataFrame(np.arange(1, self.chrom_sizes[k] + 1), columns=["loc"])
                 df2 = pd.DataFrame(self.coverages[k], columns=["loc", "score"])
                 df2["loc"] = df2["loc"].astype(int)
@@ -129,13 +129,13 @@ class Wiggle:
     def get_seq_length(seq_id) -> int or None:
         Entrez.email = "muhammad_elhossary@hotmail.com"
         try:
-            logger.info(f"===> Trying to get sequence ID length for: {seq_id}")
+            logger.info(f"Trying to get sequence ID length for: {seq_id}")
             esummary_handle = Entrez.esummary(
                 db="nuccore", id=seq_id, report="full", idtype="acc"
             )
             esummary_record = Entrez.read(esummary_handle)[0]
         except Exception as e:
-            logger.warning(f"===> Error fetching metadata: {e.args}")
+            logger.warning(f"Error fetching metadata: {e.args}")
             return None
         seq_len = int(
             str(esummary_record["Length"])
