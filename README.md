@@ -10,7 +10,7 @@ In benchmarking against existing annotations, GuaRNAtee was able to recall almos
 ## Installation
 
 ### Prerequisites
-- Python == 3.11
+- Python == 3.12
 - Dependencies listed in [requirements.txt](requirements.txt)
 
 ### Install Dependencies
