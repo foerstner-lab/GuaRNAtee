@@ -1,7 +1,10 @@
+import logging
 import pandas as pd
 import pybedtools as pybed
 import numpy as np
 from guarnatee_lib.helpers import Helpers
+
+logger = logging.getLogger(__name__)
 
 
 class DifferentialClassifier:
@@ -13,7 +16,7 @@ class DifferentialClassifier:
         # in_dict takes a pair of dataframes in as values of a dict where the keys are the lib names
         self.in_dict = in_dict
         if len(in_dict.keys()) != 2:
-            print("Error: non-uniformed sets passed")
+            logger.error("non-uniformed sets passed")
 
     def score_similarity(self):
         dfs = list(self.in_dict.items())

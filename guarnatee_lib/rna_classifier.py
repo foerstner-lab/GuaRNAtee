@@ -1,6 +1,7 @@
 import os
 import io
 import sys
+import logging
 from itertools import product
 import tempfile
 from Bio import SeqUtils
@@ -14,11 +15,13 @@ from guarnatee_lib.helpers import Helpers
 from guarnatee_lib.fasta import Fasta
 from sklearn.preprocessing import MinMaxScaler
 
+logger = logging.getLogger(__name__)
+
 
 class RNAClassifier:
     def __init__(self, gff_obj, anno_tbl_df: pd.DataFrame, fasta: Fasta, conf_dict: dict):
         if anno_tbl_df.empty or gff_obj.gff_df.empty:
-            print("Error: No candidates to classify")
+            logger.error("Error: No candidates to classify")
             sys.exit(1)
         prohibited_types = ["region", "exon", "sequence_feature"]
         self.gff_df = gff_obj.gff_df[~gff_obj.gff_df["type"].isin(prohibited_types)].copy()
@@ -168,9 +171,8 @@ class RNAClassifier:
             product(df["seqid"].unique().tolist(), ["+", "-"], ["start", "end"])
         )
         drop_ids = []
-        for seqid, strand, select_column in tqdm(
-            combs, desc="Cleaning redundancies", bar_format='{desc} |{bar:20}| {percentage:3.0f}%'
-        ):
+        logger.info("Cleaning redundancies")
+        for seqid, strand, select_column in combs:
             df_slice = df[(df["seqid"] == seqid) & (df["strand"] == strand)]
             select_keys = df_slice[select_column].unique().tolist()
             for select_key in select_keys:
@@ -181,7 +183,7 @@ class RNAClassifier:
                 """
                 if tmp_df["type"].unique().size > 1:
                     # Split
-                    print(tmp_df.to_string())
+                    logger.debug(tmp_df.to_string())
                     continue
                 """
                 tmp_df.sort_values(
@@ -210,7 +212,7 @@ class RNAClassifier:
         # print(clusteres_df.to_string())
 
     def classify(self):
-        print("Classifying candidates")
+        logger.info("Classifying candidates")
         anno_tbl_df = Helpers.warp_non_gff_columns(self.anno_tbl_df)
         candidates_df = anno_tbl_df.copy()
         candidates_df["type"] = "sRNA_candidate"
@@ -442,8 +444,8 @@ class RNAClassifier:
         if len(sym_diff_cg) == 0:
             return ret_dict
         if len(sym_diff_cg) > 2:
-            print("Fatal Error!")
-            sys.exit()
+            logger.error("Fatal Error: Symmetric difference has more than 2 groups")
+            sys.exit(1)
         for cg_id, cg in enumerate(sym_diff_cg):
             pos = ""
             if max(cg) < min(intersect):
@@ -451,8 +453,8 @@ class RNAClassifier:
             elif min(cg) > max(intersect):
                 pos = "after"
             else:
-                print("Fatal Error!")
-                sys.exit()
+                logger.error("Fatal Error: Unexpected overlap position")
+                sys.exit(1)
 
             ret_dict[f"diff_{pos}_size"] = len(sym_diff_cg[cg_id])
             ret_dict[f"diff_{pos}_size_perc"] = round(ret_dict[f"diff_{pos}_size"] / len(B_range) * 100, 2)
@@ -462,7 +464,7 @@ class RNAClassifier:
         return ret_dict
 
     def prefilter_candidates(self):
-        print("Pre-filtering candidates")
+        logger.info("Pre-filtering candidates")
         # self._drop_overlaps_of_cds_5_ends()
         self._drop_unwanted_classes()
         # self._drop_cross_overlapping_annotations()
@@ -545,7 +547,7 @@ class RNAClassifier:
         self.classes = Helpers.warp_non_gff_columns(self.classes)
 
     def get_gff_sequences_features(self, is_rna=False, slice_size=40) -> None:
-        print("Analyzing RNA structural features")
+        logger.info("Analyzing RNA structural features")
         gff_df = self.classes.copy()
         sequence_col = f"{'RNA' if is_rna else 'DNA'}_sequence"
         with tempfile.NamedTemporaryFile(mode="w") as temp:
@@ -589,10 +591,10 @@ class RNAClassifier:
         gff_df[f"{slice_prefix}RNA_sequence"] = gff_df["RNA_sequence"].str[-slice_size:]
         #gff_df[f"10nt_RNA_sequence"] = gff_df["RNA_sequence"].str[-10:]
         gff_df = Helpers.explode_dict_yielding_func_into_columns(gff_df, "RNA_sequence", self.get_rna_structure_scores)
-        #gff_df = Helpers.explode_dict_yielding_func_into_columns(gff_df, f"{slice_prefix}RNA_sequence", self.get_rna_structure_scores, slice_prefix)
+        gff_df = Helpers.explode_dict_yielding_func_into_columns(gff_df, f"{slice_prefix}RNA_sequence", self.get_rna_structure_scores, slice_prefix)
         #gff_df = Helpers.explode_dict_yielding_func_into_columns(gff_df, f"10nt_RNA_sequence", self._get_poly_u_score)
         #gff_df.drop(columns=["RNA_sequence", f"{slice_prefix}RNA_sequence", "10nt_RNA_sequence"], inplace=True)
-        gff_df.drop(columns=["RNA_sequence"], inplace=True)
+        gff_df.drop(columns=["RNA_sequence", f"{slice_prefix}RNA_sequence"], inplace=True)
         #gff_df.drop(columns=["RNA_sequence", "10nt_RNA_sequence"], inplace=True)
         self.classes = Helpers.warp_non_gff_columns(gff_df)
 

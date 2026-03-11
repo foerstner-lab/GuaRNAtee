@@ -1,8 +1,11 @@
 import glob
 import sys
 import os.path
+import logging
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 class GFF:
@@ -25,13 +28,13 @@ class GFF:
         self.seqid_groups = {}
 
     def parse(self):
-        print("Parsing input GFF file")
+        logger.info("Parsing input GFF file")
         parsed_paths = []
         for item in self.gff_paths:
             for sub_item in glob.glob(item):
                 if not os.path.exists(os.path.abspath(sub_item)):
-                    print(f"Error: {sub_item} File does not exist!")
-                    sys.exit()
+                    logger.error(f"{sub_item} File does not exist!")
+                    sys.exit(1)
                 parsed_paths.append(os.path.abspath(sub_item))
         for gff_path in parsed_paths:
             gff_parsed = pd.read_csv(
@@ -44,5 +47,5 @@ class GFF:
             [self.regions, self.gff_df[self.gff_df["type"] == "region"]]
         )
         self.gff_df.drop(self.regions.index, inplace=True, axis=0)
-        print(f"Parsed {self.gff_df.shape[0]} from {len(parsed_paths)} GFF files")
+        logger.info(f"Parsed {self.gff_df.shape[0]} from {len(parsed_paths)} GFF files")
 

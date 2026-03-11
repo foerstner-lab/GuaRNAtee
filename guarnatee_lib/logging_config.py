@@ -5,6 +5,27 @@ Handles integration between logging and tqdm progress bars.
 import logging
 import sys
 from typing import Optional
+from colorama import Fore, Style
+
+
+class ColoredFormatter(logging.Formatter):
+    """
+    Custom formatter that adds colors to log messages.
+    """
+
+    COLORS = {
+        'DEBUG': Fore.CYAN,
+        'INFO': Fore.YELLOW,
+        'WARNING': Fore.YELLOW,
+        'ERROR': Fore.RED,
+        'CRITICAL': Fore.RED + Style.BRIGHT,
+    }
+
+    def format(self, record):
+        log_color = self.COLORS.get(record.levelname, '')
+        record.levelname = f"{log_color}{record.levelname}{Style.RESET_ALL}"
+        record.msg = f"{log_color}{record.msg}{Style.RESET_ALL}"
+        return super().format(record)
 
 
 class TqdmLoggingHandler(logging.Handler):
@@ -42,8 +63,8 @@ def setup_logging(verbose: bool = False, use_tqdm_handler: bool = True) -> None:
     """
     log_level = logging.DEBUG if verbose else logging.INFO
 
-    # Create formatter
-    formatter = logging.Formatter(
+    # Create colored formatter
+    formatter = ColoredFormatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )

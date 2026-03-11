@@ -1,9 +1,12 @@
 import sys
 import typing
+import logging
 import numpy as np
 import pandas as pd
 from Bio import SeqUtils
 from multiprocessing import Pool
+
+logger = logging.getLogger(__name__)
 
 
 class Helpers:
@@ -25,7 +28,7 @@ class Helpers:
             df.drop(["attributes"], inplace=True, axis=1)
 
         else:
-            print("Warning: Attributes column not found!")
+            logger.warning("Attributes column not found!")
         return df
 
     @staticmethod
@@ -79,11 +82,11 @@ class Helpers:
         df_columns = df.columns.tolist()
         # Checking inputs
         if not set(essential_columns).issubset(df_columns):
-            print("Error: Missing essential columns")
-            sys.sys.exit(1)
+            logger.error("Missing essential columns")
+            sys.exit(1)
         if "strand" not in df_columns and strand not in ["+", "-"]:
-            print("Error: Missing strand information")
-            sys.sys.exit(1)
+            logger.error("Missing strand information")
+            sys.exit(1)
         # Adding missing columns
         if "source" not in df_columns:
             df["source"] = anno_source
@@ -143,7 +146,7 @@ class Helpers:
         for attr_pair in attr_pairs:
             attr_pair_lst = attr_pair.split("=")
             if len(attr_pair_lst) != 2:
-                print(f"Warning: Skipping ambiguous key/value pair in GFF at: {attr_str}")
+                logger.warning(f"Skipping ambiguous key/value pair in GFF at: {attr_str}")
                 continue
             k, v = attr_pair_lst[0], attr_pair_lst[1]
             if k.lower() in attr_dict.keys():
@@ -222,7 +225,7 @@ class Helpers:
         attr_dict = {}
         for attr_pair in attr_pairs:
             if len(attr_pair) != 2:
-                print(f"Warning: Skipping ambiguous key/value pair in GFF at: {attr_pairs}")
+                logger.warning(f"Skipping ambiguous key/value pair in GFF at: {attr_pairs}")
                 continue
             if attr_pair[0] in attr_dict.keys():
                 if attr_pair[1] == attr_dict[attr_pair[0]]:

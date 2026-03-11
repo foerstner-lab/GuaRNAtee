@@ -1,18 +1,20 @@
 import sys
 import os
 import re
-import logging as logger
+import logging
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
 from Bio import Entrez
+
+logger = logging.getLogger(__name__)
 
 
 class Wiggle:
     def __init__(self, file_path, chrom_sizes=None):
         np.set_printoptions(suppress=True)
         if not os.path.exists(os.path.abspath(file_path)):
-            print(f"Error: {file_path} does not exist!")
+            logger.error(f"Error: {file_path} does not exist!")
             sys.exit(1)
         self.file_path = file_path
         self.track_type = ""
@@ -37,10 +39,8 @@ class Wiggle:
             current_wiggle_meta = self.parse_wiggle_header(
                 file_header, current_wiggle_meta
             )
-            for content_header, content in tqdm(
-                all_contents.items(),
-                desc=f"Loading wiggle file: {os.path.basename(self.file_path)}", bar_format='{desc} |{bar:20}| {percentage:3.0f}%'
-            ):
+            logger.info(f"Loading wiggle file: {os.path.basename(self.file_path)}")
+            for content_header, content in all_contents.items():
                 current_wiggle_meta = self.parse_wiggle_header(
                     content_header, current_wiggle_meta
                 )
@@ -80,17 +80,16 @@ class Wiggle:
                 )
 
     def generate_1d_signal(self):
-        with tqdm(self.coverages.keys(), bar_format='{desc} |{bar:20}| {percentage:3.0f}%') as tqdm_progress:
-            for k in tqdm_progress:
-                tqdm_progress.set_description_str(f"Parsing wiggle SeqID '{k}'")
-                df1 = pd.DataFrame(np.arange(1, self.chrom_sizes[k] + 1), columns=["loc"])
-                df2 = pd.DataFrame(self.coverages[k], columns=["loc", "score"])
-                df2["loc"] = df2["loc"].astype(int)
-                self.signals[k] = np.abs(
-                    pd.merge(df1, df2, right_on="loc", left_on="loc", how="outer")
-                    .fillna(0.0)["score"]
-                    .to_numpy()
-                )
+        for k in self.coverages.keys():
+            logger.info(f"Parsing wiggle SeqID '{k}'")
+            df1 = pd.DataFrame(np.arange(1, self.chrom_sizes[k] + 1), columns=["loc"])
+            df2 = pd.DataFrame(self.coverages[k], columns=["loc", "score"])
+            df2["loc"] = df2["loc"].astype(int)
+            self.signals[k] = np.abs(
+                pd.merge(df1, df2, right_on="loc", left_on="loc", how="outer")
+                .fillna(0.0)["score"]
+                .to_numpy()
+            )
 
     @staticmethod
     def _parse_wiggle_str(in_str):

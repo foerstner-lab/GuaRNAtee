@@ -1,4 +1,5 @@
 import os.path
+import logging
 import numpy as np
 import pandas as pd
 from scipy import signal, stats
@@ -7,10 +8,11 @@ from numpy.lib.stride_tricks import sliding_window_view
 # Assuming this import exists in your environment
 from guarnatee_lib.helpers import Helpers
 
+logger = logging.getLogger(__name__)
 np.seterr(divide="ignore", invalid="ignore")
 
 
-class WindowPeaks:
+class PeakCaller:
     def __init__(
             self,
             raw_signal: np.array,
@@ -66,7 +68,7 @@ class WindowPeaks:
                 delta=delta,
                 #mode="interp",
             )
-        print("Rolling MAD Filter")
+        logger.info("Rolling MAD Filter")
         factor = 1
         results_dict = (
             self.rolling_robust_mad(sig_deriv, window_size=smooth_win*3, sigma_cut=3.0, k_factor=1.4826, center=True))
@@ -277,7 +279,7 @@ class WindowPeaks:
         ]
         gff_df = self.get_peaks_df()
         if gff_df is None:
-            print("No peaks to export.")
+            logger.info("No peaks to export.")
             return
 
         non_gff_columns = [x for x in gff_df.columns.tolist() if x not in gff_columns]
@@ -294,4 +296,4 @@ class WindowPeaks:
             new_id=True,
         )
         gff_df.to_csv(os.path.abspath(out_path), index=False, sep="\t", header=False)
-        print("GFF exported")
+        logger.info("GFF exported")

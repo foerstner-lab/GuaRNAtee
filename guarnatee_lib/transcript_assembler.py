@@ -1,10 +1,13 @@
 import sys
 import os
+import logging
 import pandas as pd
 import pybedtools as pybed
 from tqdm import tqdm
 from guarnatee_lib.peak_caller import PeakCaller
 from guarnatee_lib.helpers import Helpers
+
+logger = logging.getLogger(__name__)
 
 
 class TranscriptAssembler:
@@ -26,9 +29,7 @@ class TranscriptAssembler:
         )
         self.strand = list(strands)[0] if len(strands) == 1 else None
         if self.strand is None:
-            print(
-                "Error: Non-unified stranded wiggles passed, please unify the strand files"
-            )
+            logger.error("Non-unified stranded wiggles passed, please unify the strand files")
             sys.exit(1)
         self.srna_candidates = pd.DataFrame(
             columns=["seqid", "start", "end", "attributes"]
@@ -50,7 +51,7 @@ class TranscriptAssembler:
                      "TTS_lib_windows_count", "TTS_lib_peaks_count",
                      "peaks_connections_count"])
 
-    def call_window_srna(
+    def assemble_peaks(
         self, conf_dict: dict, thres_factor) -> None:
         for seqid in self.seqids:
             """
@@ -58,7 +59,7 @@ class TranscriptAssembler:
             if seqid != "NC_002516.2":
                 continue
             """
-            print(f"Calling 5' ends for SeqID: {seqid}")
+            logger.info(f"Calling 5' ends for SeqID: {seqid}")
             five_end_peaks_obj = PeakCaller(
                 self.five_end_wiggle[seqid],
                 conf_dict["min_distance"],
@@ -69,7 +70,7 @@ class TranscriptAssembler:
                 thres_factor,
                 False
             )
-            print(f"Calling 3' ends for SeqID: {seqid}")
+            logger.info(f"Calling 3' ends for SeqID: {seqid}")
             three_end_peaks_obj = PeakCaller(
                 self.three_end_wiggle[seqid],
                 conf_dict["min_distance"],
@@ -130,7 +131,8 @@ class TranscriptAssembler:
         ret_df = pd.DataFrame(columns=base_columns)
         start_df = start_bed.to_dataframe(names=base_columns)
         end_df = end_bed.to_dataframe(names=base_columns)
-        for row_id in tqdm(start_df.index, desc="Connecting 5' - 3' ends", bar_format='{desc} |{bar:20}| {percentage:3.0f}%'):
+        logger.info("Connecting 5' - 3' ends")
+        for row_id in start_df.index:
             #if start_df.at[row_id, "start"] == 1682314:
             #    pass
             size_range = set(
@@ -165,4 +167,4 @@ class TranscriptAssembler:
             self.srna_candidates, anno_source=anno_source, anno_type=anno_type
         )
         gff_df.to_csv(os.path.abspath(out_path), index=False, sep="\t", header=False)
-        print("GFF exported")
+        logger.info("GFF exported")

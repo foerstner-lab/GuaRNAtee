@@ -15,7 +15,7 @@ from guarnatee_lib.exceptions import ProcessingError
 from guarnatee_lib.processing_result import ProcessingResult
 from guarnatee_lib.helpers import Helpers
 from guarnatee_lib.rna_classifier import RNAClassifier
-from guarnatee_lib.window_srna import WindowSRNA
+from guarnatee_lib.transcript_assembler import TranscriptAssembler
 from guarnatee_lib.wiggle import Wiggle
 
 logger = logging.getLogger(__name__)
@@ -230,16 +230,16 @@ class PairedLibraryProcessor:
         if five_end_path == three_end_path:
             # Full-length: same file for both ends
             wiggle = Wiggle(five_end_path)
-            srnas = WindowSRNA(wiggle, wiggle)
+            srnas = TranscriptAssembler(wiggle, wiggle)
         else:
             # Separate files for 5' and 3' ends
-            srnas = WindowSRNA(
+            srnas = TranscriptAssembler(
                 Wiggle(five_end_path),
                 Wiggle(three_end_path)
             )
 
         # Call window-based sRNA candidates
-        srnas.call_window_srna(self.config_dict, thres_factor=self.threshold)
+        srnas.assemble_peaks(self.config_dict, thres_factor=self.threshold)
 
         return srnas.srna_candidates, srnas.log_df
 
