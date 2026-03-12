@@ -88,11 +88,11 @@ def parse_arguments() -> argparse.Namespace:
         "--wigs",
         required=True,
         type=str,
-        action="append",
+        nargs="+",
         help=(
             "Wiggle file annotations in format: "
             "file_path:condition:replicate:strand:lib_mode "
-            "(repeat for each file)"
+            "(space separated)"
         )
     )
 

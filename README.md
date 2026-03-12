@@ -29,7 +29,7 @@ python guarnatee.py \
   --gffs genome_annotation.gff known_sRNAs.gff \
   --fastas genome_sequence.fasta \
   --wigs data.wig:condition:replicate:strand:library_mode \
-  --wigs data.wig:condition:replicate:strand:library_mode \
+         data.wig:condition:replicate:strand:library_mode \
   --out_dir output/
 ```
 
@@ -77,7 +77,7 @@ python guarnatee.py \
   --gffs genome.gff known_sRNAs.gff \
   --fastas genome.fasta \
   --wigs data_forward.wig:treatment:1:f:FL \
-  --wigs data_reverse.wig:treatment:1:r:FL \
+         data_reverse.wig:treatment:1:r:FL \
   --out_dir results/
 ```
 
@@ -89,7 +89,7 @@ python guarnatee.py \
   --wigs p1_fwd.wig:OD_0.2:1:f:P1 \
   --wigs p2_fwd.wig:OD_0.2:1:f:P2 \
   --wigs p1_rev.wig:OD_0.2:1:r:P1 \
-  --wigs p2_rev.wig:OD_0.2:1:r:P2 \
+         p2_rev.wig:OD_0.2:1:r:P2 \
   --out_dir output/
 ```
 
@@ -99,9 +99,9 @@ python guarnatee.py \
   --gffs annotations.gff known_sRNAs.gff \
   --fastas reference.fasta \
   --wigs cond1_rep1.wig:condition1:1:f:FL \
-  --wigs cond1_rep2.wig:condition1:2:f:FL \
-  --wigs cond2_rep1.wig:condition2:1:f:FL \
-  --wigs cond2_rep2.wig:condition2:2:f:FL \
+         cond1_rep2.wig:condition1:2:f:FL \
+         cond2_rep1.wig:condition2:1:f:FL \
+         cond2_rep2.wig:condition2:2:f:FL \
   --config_file custom_config.cfg \
   --threshold 2 \
   --out_dir results/ \

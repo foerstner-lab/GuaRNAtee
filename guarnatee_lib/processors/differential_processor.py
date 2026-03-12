@@ -14,7 +14,9 @@ from guarnatee_lib.constants import (
 from guarnatee_lib.exceptions import ProcessingError
 from guarnatee_lib.processing_result import ProcessingResult
 from guarnatee_lib.helpers import Helpers
+from guarnatee_lib.rna_classifier import RNAClassifier
 from guarnatee_lib.differential_classifier import DifferentialClassifier
+from guarnatee_lib.transcript_assembler import TranscriptAssembler
 from guarnatee_lib.wiggle import Wiggle
 
 logger = logging.getLogger(__name__)
@@ -148,6 +150,7 @@ class DifferentialLibraryProcessor:
         """
         # Extract sample information
         diff_five_prime_path = sample_row[WigAnnotationColumns.FILE_PATH_D5E]
+        three_end_path = sample_row[WigAnnotationColumns.FILE_PATH_3E]
         strand = sample_row[WigAnnotationColumns.STRAND]
         file_desc = sample_row[WigAnnotationColumns.FILE_DESC]
 
@@ -156,12 +159,14 @@ class DifferentialLibraryProcessor:
         # Convert strand notation
         strand_sign = self._convert_strand_notation(strand)
 
-        # Load differential wiggle
+        # Load wiggle files
         diff_wiggle = Wiggle(diff_five_prime_path)
+        three_end_wiggle = Wiggle(three_end_path)
 
         # Call differential candidates
         candidates_df, stats_df = self._call_differential_candidates(
             diff_wiggle,
+            three_end_wiggle,
             strand_sign,
             file_desc
         )
@@ -179,9 +184,9 @@ class DifferentialLibraryProcessor:
             new_id=True
         )
 
-        # Classify with differential classifier
+        # Classify with RNA classifier
         candidates_df = Helpers.warp_non_gff_columns(
-            DifferentialClassifier(
+            RNAClassifier(
                 self.gff_obj,
                 candidates_df,
                 self.fastas,
@@ -214,6 +219,7 @@ class DifferentialLibraryProcessor:
     def _call_differential_candidates(
         self,
         diff_wiggle: Wiggle,
+        three_end_wiggle: Wiggle,
         strand: str,
         file_desc: str
     ) -> tuple:
@@ -221,37 +227,22 @@ class DifferentialLibraryProcessor:
         Call candidates from differential enrichment data.
 
         Args:
-            diff_wiggle: Wiggle object with differential signal
+            diff_wiggle: Wiggle object with differential 5' end signal
+            three_end_wiggle: Wiggle object with 3' end signal
             strand: Strand notation
             file_desc: File description for logging
 
         Returns:
             Tuple of (candidates_df, stats_df)
         """
-        # Use DifferentialClassifier to process the differential signal
-        # This is a placeholder - actual implementation depends on
-        # DifferentialClassifier's interface
+        logger.debug(f"Calling transcript assembler for {file_desc}")
 
-        # For now, create empty DataFrames with expected structure
-        candidates_df = pd.DataFrame(
-            columns=[GFFColumns.SEQID, GFFColumns.START, GFFColumns.END, GFFColumns.ATTRIBUTES]
-        )
+        # Use TranscriptAssembler to call peaks and assemble transcripts
+        assembler = TranscriptAssembler(diff_wiggle, three_end_wiggle)
+        assembler.assemble_peaks(self.config_dict, thres_factor=self.threshold)
 
-        stats_df = pd.DataFrame(
-            columns=[
-                StatisticsColumns.SEQID,
-                StatisticsColumns.TSS_LIB_WINDOWS_COUNT,
-                StatisticsColumns.TSS_LIB_PEAKS_COUNT,
-                StatisticsColumns.TTS_LIB_WINDOWS_COUNT,
-                StatisticsColumns.TTS_LIB_PEAKS_COUNT,
-                StatisticsColumns.PEAKS_CONNECTIONS_COUNT
-            ]
-        )
-
-        logger.warning(
-            f"Differential processing for {file_desc} is not fully implemented. "
-            "Returning empty results."
-        )
+        candidates_df = assembler.srna_candidates
+        stats_df = assembler.log_df
 
         return candidates_df, stats_df
 
