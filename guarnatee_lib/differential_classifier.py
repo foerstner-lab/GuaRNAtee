@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 class DifferentialClassifier:
     """
-    This class is to compare two sets of prediction typically TEX+ and TEX-
+    This class is to compare two sets of prediction, typically TEX+ and TEX-
     """
 
     def __init__(self, in_dict: dict):
