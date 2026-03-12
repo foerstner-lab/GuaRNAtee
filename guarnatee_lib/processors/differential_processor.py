@@ -14,7 +14,7 @@ from guarnatee_lib.constants import (
 from guarnatee_lib.exceptions import ProcessingError
 from guarnatee_lib.processing_result import ProcessingResult
 from guarnatee_lib.helpers import Helpers
-from guarnatee_lib.differential_classifier import DifferentialClassifier
+from guarnatee_lib.rna_classifier import RNAClassifier
 from guarnatee_lib.wiggle import Wiggle
 
 logger = logging.getLogger(__name__)
@@ -179,9 +179,9 @@ class DifferentialLibraryProcessor:
             new_id=True
         )
 
-        # Classify with differential classifier
+        # Classify with RNA classifier
         candidates_df = Helpers.warp_non_gff_columns(
-            DifferentialClassifier(
+            RNAClassifier(
                 self.gff_obj,
                 candidates_df,
                 self.fastas,

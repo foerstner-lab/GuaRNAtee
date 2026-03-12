@@ -12,3 +12,4 @@ scikit-learn
 ViennaRNA
 colorama
 argcomplete
+numba
