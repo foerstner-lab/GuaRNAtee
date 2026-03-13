@@ -1,8 +1,5 @@
 __pycache__
 **/__pycache__
 .venv
-inputs
-outputs
-*.gff
-*.ipynb
-*.sh
+testing
+vcs.xml

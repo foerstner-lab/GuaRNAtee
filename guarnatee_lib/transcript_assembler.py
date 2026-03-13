@@ -3,6 +3,7 @@ import os
 import logging
 import pandas as pd
 import pybedtools as pybed
+from pathlib import Path
 from tqdm import tqdm
 from guarnatee_lib.peak_caller import PeakCaller
 from guarnatee_lib.helpers import Helpers
@@ -16,7 +17,15 @@ class TranscriptAssembler:
     which combines peaks called from PeakCaller into transcript candidates to form RNA annotation candidates
     """
 
-    def __init__(self, five_end_wiggle, three_end_wiggle):
+    def __init__(
+        self,
+        five_end_wiggle,
+        three_end_wiggle,
+        output_dir: str = None,
+        condition: str = None,
+        replicate: str = None,
+        lib_mode: str = None
+    ):
         self.seqids = set.intersection(
             set(list(five_end_wiggle.signals.keys())),
             set(list(three_end_wiggle.signals.keys())),
@@ -31,6 +40,18 @@ class TranscriptAssembler:
         if self.strand is None:
             logger.error("Non-unified stranded wiggles passed, please unify the strand files")
             sys.exit(1)
+
+        # Setup output directory for intermediate files
+        self.output_dir = output_dir
+        self.condition = condition
+        self.replicate = replicate
+        self.lib_mode = lib_mode
+        if self.output_dir:
+            self.intermediate_dir = Path(output_dir) / "intermediate"
+            self.intermediate_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            self.intermediate_dir = None
+
         self.srna_candidates = pd.DataFrame(
             columns=["seqid", "start", "end", "attributes"]
         )
@@ -81,8 +102,23 @@ class TranscriptAssembler:
                 thres_factor,
                 True
             )
-            five_end_peaks_obj.export_to_gff(f"{seqid}_{self.strand}_5.gff", seqid=seqid, strand=self.strand)
-            three_end_peaks_obj.export_to_gff(f"{seqid}_{self.strand}_3.gff", seqid=seqid, strand=self.strand)
+            # Export intermediate peak files if output directory is set
+            if self.intermediate_dir:
+                # Build filename with metadata: condition_replicate_libmode_seqid_strand_end.gff
+                filename_parts = []
+                if self.condition:
+                    filename_parts.append(self.condition)
+                if self.replicate:
+                    filename_parts.append(f"rep{self.replicate}")
+                if self.lib_mode:
+                    filename_parts.append(self.lib_mode)
+                filename_parts.extend([seqid, self.strand])
+
+                base_name = "_".join(filename_parts)
+                five_end_path = self.intermediate_dir / f"{base_name}_5.gff"
+                three_end_path = self.intermediate_dir / f"{base_name}_3.gff"
+                five_end_peaks_obj.export_to_gff(str(five_end_path), seqid=seqid, strand=self.strand)
+                three_end_peaks_obj.export_to_gff(str(three_end_path), seqid=seqid, strand=self.strand)
 
             five_end_peaks_str = five_end_peaks_obj.get_bed_str(seqid)
             three_end_peaks_str = three_end_peaks_obj.get_bed_str(seqid)
@@ -131,7 +167,7 @@ class TranscriptAssembler:
         ret_df = pd.DataFrame(columns=base_columns)
         start_df = start_bed.to_dataframe(names=base_columns)
         end_df = end_bed.to_dataframe(names=base_columns)
-        logger.info("Connecting 5' - 3' ends")
+        logger.info("Assembling 5' - 3' ends")
         for row_id in start_df.index:
             #if start_df.at[row_id, "start"] == 1682314:
             #    pass

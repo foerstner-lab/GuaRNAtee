@@ -36,7 +36,8 @@ class PairedLibraryProcessor:
         gff_obj,
         fastas,
         config_dict: Dict[str, Any],
-        threshold: int
+        threshold: int,
+        output_dir: str = None
     ):
         """
         Initialize paired library processor.
@@ -46,11 +47,13 @@ class PairedLibraryProcessor:
             fastas: Fasta sequence object
             config_dict: Configuration dictionary
             threshold: Peak calling threshold factor
+            output_dir: Output directory for intermediate files
         """
         self.gff_obj = gff_obj
         self.fastas = fastas
         self.config_dict = config_dict
         self.threshold = threshold
+        self.output_dir = output_dir
 
     def process(
         self,
@@ -95,6 +98,7 @@ class PairedLibraryProcessor:
             # Post-process combined results
             if not export_df.empty:
                 export_df = self._cluster_candidates(export_df)
+                export_df = self._merge_identical_candidates(export_df)
                 export_df = self._finalize_candidates(export_df)
 
             logger.info(
@@ -160,10 +164,18 @@ class PairedLibraryProcessor:
         # Convert strand notation
         strand_sign = self._convert_strand_notation(strand)
 
+        # Extract metadata for intermediate files
+        condition = sample_row[WigAnnotationColumns.CONDITION]
+        replicate = sample_row[WigAnnotationColumns.REPLICATE]
+        lib_mode = sample_row[WigAnnotationColumns.LIB_MODE]
+
         # Call sRNA candidates
         candidates_df, stats_df = self._call_srnas(
             five_prime_path,
-            three_prime_path
+            three_prime_path,
+            condition,
+            replicate,
+            lib_mode
         )
 
         # Annotate candidates
@@ -214,7 +226,10 @@ class PairedLibraryProcessor:
     def _call_srnas(
         self,
         five_end_path: str,
-        three_end_path: str
+        three_end_path: str,
+        condition: str = None,
+        replicate: str = None,
+        lib_mode: str = None
     ) -> tuple:
         """
         Call sRNA candidates from wiggle files.
@@ -222,6 +237,9 @@ class PairedLibraryProcessor:
         Args:
             five_end_path: Path to 5' end wiggle file
             three_end_path: Path to 3' end wiggle file
+            condition: Sample condition
+            replicate: Sample replicate
+            lib_mode: Library mode
 
         Returns:
             Tuple of (candidates_df, stats_df)
@@ -230,12 +248,18 @@ class PairedLibraryProcessor:
         if five_end_path == three_end_path:
             # Full-length: same file for both ends
             wiggle = Wiggle(five_end_path)
-            srnas = TranscriptAssembler(wiggle, wiggle)
+            srnas = TranscriptAssembler(
+                wiggle, wiggle, self.output_dir, condition, replicate, lib_mode
+            )
         else:
             # Separate files for 5' and 3' ends
             srnas = TranscriptAssembler(
                 Wiggle(five_end_path),
-                Wiggle(three_end_path)
+                Wiggle(three_end_path),
+                self.output_dir,
+                condition,
+                replicate,
+                lib_mode
             )
 
         # Call window-based sRNA candidates
@@ -269,6 +293,82 @@ class PairedLibraryProcessor:
         export_df = Helpers.warp_non_gff_columns(export_df)
 
         return export_df
+
+    def _merge_identical_candidates(self, export_df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Merge candidates with identical genomic coordinates and annotations.
+
+        Candidates are considered identical if they have the same:
+        - seqid, start, end, strand
+        - annotation_class, sub_class, detection_status
+        - gene associations
+
+        For merged candidates, the condition field will list all contributing samples.
+
+        Args:
+            export_df: DataFrame with clustered candidates
+
+        Returns:
+            DataFrame with identical candidates merged
+        """
+        logger.info("Merging identical candidates across replicates/conditions")
+
+        # Expand attributes to access individual fields
+        df = Helpers.expand_attributes_to_columns(export_df)
+
+        # Define columns that must match for candidates to be considered identical
+        merge_keys = [
+            GFFColumns.SEQID,
+            GFFColumns.START,
+            GFFColumns.END,
+            GFFColumns.STRAND,
+            "cluster_id"
+        ]
+
+        # Add annotation keys if they exist
+        annotation_keys = [
+            "annotation_class", "sub_class", "detection_status",
+            "gene_name", "gene_locus_tag", "cds_protein_id", "ncrna_name"
+        ]
+        for key in annotation_keys:
+            if key in df.columns:
+                merge_keys.append(key)
+
+        # Count candidates before merge
+        initial_count = len(df)
+
+        # Group by identical annotations and aggregate
+        # Collect all conditions that contributed to each merged candidate
+        if "condition" in df.columns:
+            df["conditions"] = df["condition"]
+            agg_dict = {
+                "conditions": lambda x: ";".join(sorted(set(x))),
+                "condition": "first"  # Keep first condition for compatibility
+            }
+
+            # For numeric columns, take the best (max) value
+            numeric_cols = ["ss_step_factor", "ts_step_factor", "mfe"]
+            for col in numeric_cols:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+                    agg_dict[col] = "max"
+
+            # Count how many candidates were merged
+            agg_dict["merge_count"] = "count"
+
+            merged_df = df.groupby(merge_keys, as_index=False, dropna=False).agg(agg_dict)
+
+            final_count = len(merged_df)
+            logger.info(f"Merged {initial_count - final_count} duplicate candidates "
+                       f"({initial_count} → {final_count})")
+
+            # Wrap attributes back
+            merged_df = Helpers.warp_non_gff_columns(merged_df)
+
+            return merged_df
+        else:
+            logger.warning("No 'condition' column found, skipping merge")
+            return export_df
 
     def _finalize_candidates(self, export_df: pd.DataFrame) -> pd.DataFrame:
         """
