@@ -314,9 +314,7 @@ class ExportManager:
                 ],
                 as_index=False
             ).agg({
-                StatisticsColumns.TSS_LIB_WINDOWS_COUNT: "sum",
                 StatisticsColumns.TSS_LIB_PEAKS_COUNT: "sum",
-                StatisticsColumns.TTS_LIB_WINDOWS_COUNT: "sum",
                 StatisticsColumns.TTS_LIB_PEAKS_COUNT: "sum",
                 StatisticsColumns.PEAKS_CONNECTIONS_COUNT: "sum"
             })
