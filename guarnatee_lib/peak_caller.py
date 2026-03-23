@@ -233,6 +233,7 @@ class PeakCaller:
             data=self.peaks_arr,
             columns=[
                 "peak_index",
+                f"{self.prefix}_iqr_factor",  # TODO: Remove
                 f"{self.prefix}_diff_height",
                 f"{self.prefix}_height",
                 f"{self.prefix}_upstream",
