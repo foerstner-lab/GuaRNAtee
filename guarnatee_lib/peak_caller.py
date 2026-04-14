@@ -38,88 +38,53 @@ class PeakCaller:
 
     def call_signal_peaks(self) -> np.array:
         """
-        Main method to detect outliers using a Rolling Hampel Filter
-        on the 1st derivative of the signal.
+        Multi-scale peak detection: runs Savitzky-Golay + Rolling MAD at
+        several window sizes and merges results to catch peaks at different scales.
         """
-        # 1. Calculate Derivative
-        delta = 0.1
-        smooth_win = 7
         polyorder = 1
         if self.is_coarse:
-            smooth_win = 31
-
-        if self.is_reversed:
-            sig_deriv = np.flipud(
-                signal.savgol_filter(
-                    np.flipud(self.raw_signal),
-                    window_length=smooth_win,
-                    polyorder=polyorder,
-                    deriv=1,
-                    delta=delta,
-                    #mode="interp",
-                )
-            )
+            window_sizes = [15, 21, 31, 41, 51]
         else:
-            sig_deriv = signal.savgol_filter(
-                self.raw_signal,
-                window_length=smooth_win,
-                polyorder=polyorder,
-                deriv=1,
-                delta=delta,
-                #mode="interp",
-            )
-        logger.info("Rolling MAD Filter")
-        factor = 1
-        results_dict = (
-            self.rolling_robust_mad(sig_deriv, window_size=smooth_win*3, sigma_cut=3.0, k_factor=1.4826, center=True))
+            window_sizes = [5, 7, 11, 15, 21]
 
+        all_peaks = []
+        all_heights = []
 
-        height_threshold = results_dict["upper_bound"]
-        prominence_threshold = results_dict["mads"] * 1.4826 * factor
+        for smooth_win in window_sizes:
+            peaks, heights = self._detect_peaks_single_scale(smooth_win, polyorder)
+            if peaks.size > 0:
+                all_peaks.append(peaks)
+                all_heights.append(heights)
 
-
-        # 3. Call Peaks
-        # We pass the arrays as thresholds, so every point has its own unique threshold
-        peaks, peaks_props = signal.find_peaks(
-            sig_deriv,
-            height=height_threshold,
-            prominence=prominence_threshold,
-            distance=self.min_peak_distance
-        )
-
-        if peaks.size == 0:
+        if not all_peaks:
             return None
 
-        # 4. Post-Processing (Existing Logic)
-        # Shift index by 1 because diff reduces length by 1
-        adjusted_peaks = peaks + 1 if not self.is_reversed else peaks
+        merged_peaks = np.concatenate(all_peaks)
+        merged_heights = np.concatenate(all_heights)
 
-        # Vectorized calculation of attributes (Faster than list comp)
+        peaks, peak_heights_deriv = self._deduplicate_peaks(
+            merged_peaks, merged_heights, self.min_peak_distance
+        )
+
+        adjusted_peaks = peaks + 1 if not self.is_reversed else peaks
         peak_indices = adjusted_peaks.astype(int)
 
-        # Safe bounds checking
         max_idx = len(self.raw_signal)
         valid_mask = (peak_indices >= 3) & (peak_indices < max_idx - 15)
         peak_indices = peak_indices[valid_mask]
-        peak_heights_deriv = peaks_props["peak_heights"][valid_mask]
+        peak_heights_deriv = peak_heights_deriv[valid_mask]
 
         if len(peak_indices) == 0:
             return None
 
-        # Extract Raw Signal Metrics
         raw_heights = self.raw_signal[peak_indices]
 
-        # Vectorized window slicing for means
-        # Create a view for sliding windows to avoid slow python loops
-        # Mean Step Before (x-3 : x)
         mean_step_before = np.mean([self.raw_signal[i - 3:i] for i in peak_indices], axis=1)
-        # Mean Step After (x+1 : x+4)
         mean_step_after = np.mean([self.raw_signal[i + 1:i + 4] for i in peak_indices], axis=1)
 
         step_factor = (mean_step_before / mean_step_after) if self.is_reversed \
             else (mean_step_after / mean_step_before)
 
-        # Plateau Calculation
         plateau_width = 12
         if self.is_reversed:
             plateau_means = [np.mean(self.raw_signal[i - plateau_width - 1: i]) for i in peak_indices]
@@ -128,12 +93,10 @@ class PeakCaller:
 
         plateau_means = np.array(plateau_means)
 
-        # 5. Filter & Assemble
-        # Columns: [index, diff_height, raw_height, upstream, downstream, step_factor, plateau]
         all_data = np.stack(
             (
                 peak_indices,
-                np.full_like(peak_indices, self.thres_factor, dtype=float),  # Keep strictness factor
+                np.full_like(peak_indices, self.thres_factor, dtype=float),
                 np.round(peak_heights_deriv, 2),
                 np.round(raw_heights, 2),
                 np.round(mean_step_before, 2),
@@ -144,17 +107,79 @@ class PeakCaller:
             axis=-1,
         )
 
-        # Apply Filters
-        # Note: plateau_cov_filter (zeros check) implies we shouldn't have NaNs/Zeros in plateau
-        # Simplified here to checking if plateau > 0
         mask = (
-                (all_data[:, 2] >= self.min_height) &  # Min Peak Height (Deriv)
-                (all_data[:, 6] >= self.min_step_factor) &  # Min Step Factor
-                (all_data[:, 7] > 0)  # Plateau not empty/zero
+                (all_data[:, 2] >= self.min_height) &
+                (all_data[:, 6] >= self.min_step_factor) &
+                (all_data[:, 7] > 0)
         )
 
         final_peaks = all_data[mask]
         return final_peaks if final_peaks.size > 0 else None
+
+    def _detect_peaks_single_scale(self, smooth_win, polyorder=1, delta=0.1):
+        """Run savgol + rolling MAD peak detection at a single window size."""
+        if self.is_reversed:
+            sig_deriv = np.flipud(
+                signal.savgol_filter(
+                    np.flipud(self.raw_signal),
+                    window_length=smooth_win,
+                    polyorder=polyorder,
+                    deriv=1,
+                    delta=delta,
+                )
+            )
+        else:
+            sig_deriv = signal.savgol_filter(
+                self.raw_signal,
+                window_length=smooth_win,
+                polyorder=polyorder,
+                deriv=1,
+                delta=delta,
+            )
+
+        mad_window = smooth_win * 3
+        if len(sig_deriv) < mad_window:
+            return np.array([]), np.array([])
+
+        results_dict = self.rolling_robust_mad(
+            sig_deriv, window_size=mad_window, sigma_cut=3.0, k_factor=1.4826, center=True
+        )
+        height_threshold = results_dict["upper_bound"]
+
+        peaks, peaks_props = signal.find_peaks(
+            sig_deriv,
+            height=height_threshold,
+        )
+
+        if peaks.size == 0:
+            return np.array([]), np.array([])
+
+        return peaks, peaks_props["peak_heights"]
+
+    @staticmethod
+    def _deduplicate_peaks(peaks, heights, min_distance):
+        """Merge peaks within min_distance, keeping the one with the highest derivative."""
+        sort_idx = np.argsort(peaks)
+        peaks = peaks[sort_idx]
+        heights = heights[sort_idx]
+
+        final_peaks = []
+        final_heights = []
+        i = 0
+        while i < len(peaks):
+            group_peaks = [peaks[i]]
+            group_heights = [heights[i]]
+            j = i + 1
+            while j < len(peaks) and peaks[j] - peaks[i] <= min_distance:
+                group_peaks.append(peaks[j])
+                group_heights.append(heights[j])
+                j += 1
+            best = int(np.argmax(group_heights))
+            final_peaks.append(group_peaks[best])
+            final_heights.append(group_heights[best])
+            i = j
+
+        return np.array(final_peaks), np.array(final_heights)
 
     @staticmethod
     @njit(parallel=True, cache=True)
@@ -225,6 +250,74 @@ class PeakCaller:
             "mads": mads
         }
 
+
+    def call_signal_peaks_cwt(self, widths=None) -> np.array:
+        """
+        Alternative peak detection using Continuous Wavelet Transform.
+        Inherently multi-scale — searches across all given widths simultaneously.
+        Unused — kept for future experimentation.
+        """
+        if widths is None:
+            widths = np.arange(1, 30)
+
+        if self.is_reversed:
+            sig = np.flipud(self.raw_signal)
+        else:
+            sig = self.raw_signal
+
+        peaks = signal.find_peaks_cwt(sig, widths)
+
+        if peaks.size == 0:
+            return None
+
+        if self.is_reversed:
+            peaks = len(self.raw_signal) - 1 - peaks
+
+        peak_indices = peaks.astype(int)
+        max_idx = len(self.raw_signal)
+        valid_mask = (peak_indices >= 3) & (peak_indices < max_idx - 15)
+        peak_indices = peak_indices[valid_mask]
+
+        if len(peak_indices) == 0:
+            return None
+
+        raw_heights = self.raw_signal[peak_indices]
+
+        mean_step_before = np.mean([self.raw_signal[i - 3:i] for i in peak_indices], axis=1)
+        mean_step_after = np.mean([self.raw_signal[i + 1:i + 4] for i in peak_indices], axis=1)
+
+        step_factor = (mean_step_before / mean_step_after) if self.is_reversed \
+            else (mean_step_after / mean_step_before)
+
+        plateau_width = 12
+        if self.is_reversed:
+            plateau_means = [np.mean(self.raw_signal[i - plateau_width - 1: i]) for i in peak_indices]
+        else:
+            plateau_means = [np.mean(self.raw_signal[i: i + plateau_width]) for i in peak_indices]
+
+        plateau_means = np.array(plateau_means)
+
+        all_data = np.stack(
+            (
+                peak_indices,
+                np.full_like(peak_indices, self.thres_factor, dtype=float),
+                np.zeros_like(peak_indices, dtype=float),
+                np.round(raw_heights, 2),
+                np.round(mean_step_before, 2),
+                np.round(mean_step_after, 2),
+                np.round(step_factor, 2),
+                np.round(plateau_means, 2),
+            ),
+            axis=-1,
+        )
+
+        mask = (
+                (all_data[:, 6] >= self.min_step_factor) &
+                (all_data[:, 7] > 0)
+        )
+
+        final_peaks = all_data[mask]
+        return final_peaks if final_peaks.size > 0 else None
 
     def get_peaks_df(self):
         if self.peaks_arr is None:
