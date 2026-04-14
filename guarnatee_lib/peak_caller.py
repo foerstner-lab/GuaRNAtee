@@ -23,7 +23,8 @@ class PeakCaller:
             prefix="",
             thres_factor=1.0,
             is_coarse=False,
-            smooth_wins=None
+            smooth_wins=None,
+            mad_factors=None
     ):
         self.raw_signal = raw_signal
         # Hampel window size (points to look at on either side)
@@ -42,6 +43,14 @@ class PeakCaller:
                 self.smooth_wins = list(range(7, 33, 2))
         else:
             self.smooth_wins = smooth_wins
+
+        if mad_factors is None:
+            if self.is_coarse:
+                self.mad_factors = [3]
+            else:
+                self.mad_factors = [1, 2, 3, 4]
+        else:
+            self.mad_factors = mad_factors
         self.peaks_arr = self.call_signal_peaks()
 
     def call_signal_peaks(self) -> np.array:
@@ -51,9 +60,10 @@ class PeakCaller:
         """
         all_peaks = []
         for smooth_win in self.smooth_wins:
-            peaks = self._call_peaks_for_window(smooth_win)
-            if peaks is not None:
-                all_peaks.append(peaks)
+            for mad_factor in self.mad_factors:
+                peaks = self._call_peaks_for_window(smooth_win, mad_factor)
+                if peaks is not None:
+                    all_peaks.append(peaks)
 
         if not all_peaks:
             return None
@@ -68,7 +78,7 @@ class PeakCaller:
 
         return df.to_numpy()
 
-    def _call_peaks_for_window(self, smooth_win: int) -> np.array:
+    def _call_peaks_for_window(self, smooth_win: int, mad_factor: int) -> np.array:
         """
         Internal method to call peaks for a specific smoothing window.
         """
@@ -96,10 +106,10 @@ class PeakCaller:
                 delta=delta,
                 # mode="interp",
             )
-        logger.info(f"Rolling MAD Filter with window {smooth_win}")
+        logger.info(f"Rolling MAD Filter with window {smooth_win} and factor {mad_factor}")
         factor = 1
         results_dict = (
-            self.rolling_robust_mad(sig_deriv, window_size=smooth_win * 3, sigma_cut=3.0, k_factor=1.4826, center=True))
+            self.rolling_robust_mad(sig_deriv, window_size=smooth_win * mad_factor, sigma_cut=3.0, k_factor=1.4826, center=True))
 
         height_threshold = results_dict["upper_bound"]
         prominence_threshold = results_dict["mads"] * 1.4826 * factor
