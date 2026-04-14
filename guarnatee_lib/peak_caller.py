@@ -43,9 +43,9 @@ class PeakCaller:
         """
         polyorder = 1
         if self.is_coarse:
-            window_sizes = [15, 21, 31, 41, 51]
+            window_sizes = list(range(5, 33, 2))
         else:
-            window_sizes = [5, 7, 11, 15, 21]
+            window_sizes = list(range(5, 21, 2))
 
         all_peaks = []
         all_heights = []
@@ -137,7 +137,7 @@ class PeakCaller:
                 delta=delta,
             )
 
-        mad_window = smooth_win * 3
+        mad_window = min(smooth_win * 3, 63)
         if len(sig_deriv) < mad_window:
             return np.array([]), np.array([])
 

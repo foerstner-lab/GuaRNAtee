@@ -395,4 +395,20 @@ class DifferentialLibraryProcessor:
         # Ensure source is set
         export_df[GFFColumns.SOURCE] = AnnotationSource.GUARNATEE
 
+        # Reassign unique IDs across all combined conditions
+        for i in export_df.index:
+            seqid = export_df.at[i, GFFColumns.SEQID]
+            strand = export_df.at[i, GFFColumns.STRAND]
+            strand_letter = "F" if strand == "+" else "R"
+            new_id = f"{seqid}{strand_letter}_{AnnotationType.CANDIDATE}_{i}"
+            attr_str = export_df.at[i, GFFColumns.ATTRIBUTES]
+            attr = Helpers.parse_attributes(attr_str) if attr_str else {}
+            attr.pop("id", None)
+            attr.pop("name", None)
+            other_attrs = ";".join(f"{k}={v}" for k, v in attr.items())
+            new_attr = f"ID={new_id};name={new_id}"
+            if other_attrs:
+                new_attr += f";{other_attrs}"
+            export_df.at[i, GFFColumns.ATTRIBUTES] = new_attr
+
         return export_df
