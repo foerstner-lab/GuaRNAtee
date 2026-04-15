@@ -29,7 +29,7 @@ __author__ = ("Muhammad Elhossary <elhossary@zbmed.de> "
 __copyright__ = "2021 by Muhammad Elhossary <elhossary@zbmed.de>"
 __license__ = "ISC license"
 __email__ = "elhossary@zbmed.de"
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 __maintainer__ = "Muhammad Elhossary"
 
 
