@@ -5,6 +5,7 @@ Coordinates loading, validation, processing, and export.
 import logging
 from typing import List, Dict, Any
 from pathlib import Path
+from datetime import datetime
 
 from guarnatee_lib.config_manager import ConfigManager
 from guarnatee_lib.input_validator import WigfileValidator
@@ -59,7 +60,7 @@ class PipelineOrchestrator:
         self.fasta_paths = fasta_paths
         self.wig_annotations = wig_annotations
         self.config = config
-        self.output_dir = Path(output_dir).resolve()
+        self.output_dir = self._prepare_output_directory(output_dir)
         self.threshold = threshold
 
         # Will be populated during run()
@@ -69,6 +70,33 @@ class PipelineOrchestrator:
         self.results: List[ProcessingResult] = []
 
         logger.info("PipelineOrchestrator initialized")
+
+    def _prepare_output_directory(self, output_dir: str) -> Path:
+        """
+        Prepare output directory, creating timestamped version if it exists.
+
+        Args:
+            output_dir: Requested output directory path
+
+        Returns:
+            Path object for the output directory to use
+        """
+        output_path = Path(output_dir).resolve()
+
+        # If directory doesn't exist, create it
+        if not output_path.exists():
+            output_path.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Created output directory: {output_path}")
+            return output_path
+
+        # Directory exists, create timestamped version
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamped_path = output_path.parent / f"{output_path.name}_{timestamp}"
+        timestamped_path.mkdir(parents=True, exist_ok=True)
+        logger.info(
+            f"Output directory exists. Created new directory: {timestamped_path}"
+        )
+        return timestamped_path
 
     def run(self) -> List[ProcessingResult]:
         """
@@ -173,7 +201,8 @@ class PipelineOrchestrator:
                         self.gff_obj,
                         self.fastas,
                         config_dict,
-                        self.threshold
+                        self.threshold,
+                        str(self.output_dir)
                     )
                 else:
                     # Use paired processor (handles FL, Paired, dual_lib)
@@ -181,7 +210,8 @@ class PipelineOrchestrator:
                         self.gff_obj,
                         self.fastas,
                         config_dict,
-                        self.threshold
+                        self.threshold,
+                        str(self.output_dir)
                     )
 
                 result = processor.process(wigs_df, library_type)
@@ -208,8 +238,8 @@ class PipelineOrchestrator:
             logger.warning("No results to export")
             return
 
-        # Create output directory
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        # Output directory already prepared in __init__
+        # No need to create it again
 
         # Initialize export manager
         seqid_groups = self.fastas.organism_seqid_groups

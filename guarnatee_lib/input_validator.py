@@ -177,7 +177,7 @@ class WigfileValidator:
             columns={WigAnnotationColumns.FILE_PATH: WigAnnotationColumns.FILE_PATH_5E},
             inplace=True
         )
-        fl_wigs_df.drop(columns=[WigAnnotationColumns.LIB_MODE], inplace=True)
+        # Keep lib_mode for metadata tracking in intermediate files
 
         return fl_wigs_df
 
@@ -206,8 +206,8 @@ class WigfileValidator:
             pairs_wigs_df[WigAnnotationColumns.LIB_MODE] == LibraryModes.PAIRED_2
         ].copy()
 
-        # Remove lib_mode before merge
-        p1_df = p1_df[[WigAnnotationColumns.FILE_PATH] + merge_keys]
+        # Keep file_path and lib_mode for metadata tracking
+        p1_df = p1_df[[WigAnnotationColumns.FILE_PATH, WigAnnotationColumns.LIB_MODE] + merge_keys]
         p2_df = p2_df[[WigAnnotationColumns.FILE_PATH] + merge_keys]
 
         merged_df = pd.merge(
@@ -217,6 +217,10 @@ class WigfileValidator:
             how="inner",
             suffixes=('_5e', '_3e')
         )
+
+        # Set lib_mode to "Paired" for merged P1/P2 libraries
+        if not merged_df.empty:
+            merged_df[WigAnnotationColumns.LIB_MODE] = "Paired"
 
         if merged_df.empty:
             logger.warning("No matching P1/P2 pairs found")
@@ -249,15 +253,15 @@ class WigfileValidator:
             ends_wigs_df[WigAnnotationColumns.LIB_MODE] == LibraryModes.DIFF_5_PRIME
         ].copy()
 
-        # Remove lib_mode column
+        # Keep lib_mode for metadata tracking
         diff_ends_wigs_df = diff_ends_wigs_df[
-            [WigAnnotationColumns.FILE_PATH] + merge_keys
+            [WigAnnotationColumns.FILE_PATH, WigAnnotationColumns.LIB_MODE] + merge_keys
         ]
 
         # Merge 5E and 3E libraries
         e5_df = ends_wigs_df[
             ends_wigs_df[WigAnnotationColumns.LIB_MODE] == LibraryModes.END_5_PRIME
-        ][[WigAnnotationColumns.FILE_PATH] + merge_keys]
+        ][[WigAnnotationColumns.FILE_PATH, WigAnnotationColumns.LIB_MODE] + merge_keys]
 
         e3_df = ends_wigs_df[
             ends_wigs_df[WigAnnotationColumns.LIB_MODE] == LibraryModes.END_3_PRIME
@@ -285,6 +289,10 @@ class WigfileValidator:
             combined_df["_merge"] == "right_only"
         ].drop(columns=["_merge"]).copy()
 
+        # Set lib_mode for dual libraries (5E+3E)
+        if not dual_lib_df.empty:
+            dual_lib_df[WigAnnotationColumns.LIB_MODE] = "5E_3E"
+
         # Samples with d5E data
         diff_lib_df = combined_df[
             combined_df["_merge"] != "right_only"
@@ -295,5 +303,9 @@ class WigfileValidator:
                 columns={WigAnnotationColumns.FILE_PATH: WigAnnotationColumns.FILE_PATH_D5E},
                 inplace=True
             )
+            # Keep lib_mode from diff_ends_wigs_df (d5E)
+            # or set it explicitly if needed after merge issues
+            if WigAnnotationColumns.LIB_MODE not in diff_lib_df.columns:
+                diff_lib_df[WigAnnotationColumns.LIB_MODE] = "d5E"
 
         return dual_lib_df, diff_lib_df

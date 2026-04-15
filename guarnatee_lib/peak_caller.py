@@ -129,7 +129,7 @@ class PeakCaller:
         plateau_means = np.array(plateau_means)
 
         # 5. Filter & Assemble
-        # Columns: [index, iqr_factor(dummy), diff_height, raw_height, upstream, downstream, step_factor, plateau]
+        # Columns: [index, diff_height, raw_height, upstream, downstream, step_factor, plateau]
         all_data = np.stack(
             (
                 peak_indices,
@@ -233,7 +233,7 @@ class PeakCaller:
             data=self.peaks_arr,
             columns=[
                 "peak_index",
-                f"{self.prefix}_iqr_factor", # TODO: Remove
+                f"{self.prefix}_iqr_factor",  # TODO: Remove
                 f"{self.prefix}_diff_height",
                 f"{self.prefix}_height",
                 f"{self.prefix}_upstream",

@@ -32,13 +32,14 @@ class ExportManager:
         Initialize ExportManager.
 
         Args:
-            output_dir: Directory for output files
+            output_dir: Directory for output files (already created by orchestrator)
             seqid_groups: Mapping of organism names to sequence IDs
         """
         self.output_dir = Path(output_dir).resolve()
         self.seqid_groups = seqid_groups
 
-        # Create output directory if it doesn't exist
+        # Output directory should already exist from orchestrator
+        # Ensure it exists in case ExportManager is used standalone
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"ExportManager initialized with output directory: {self.output_dir}")
@@ -313,9 +314,7 @@ class ExportManager:
                 ],
                 as_index=False
             ).agg({
-                StatisticsColumns.TSS_LIB_WINDOWS_COUNT: "sum",
                 StatisticsColumns.TSS_LIB_PEAKS_COUNT: "sum",
-                StatisticsColumns.TTS_LIB_WINDOWS_COUNT: "sum",
                 StatisticsColumns.TTS_LIB_PEAKS_COUNT: "sum",
                 StatisticsColumns.PEAKS_CONNECTIONS_COUNT: "sum"
             })
